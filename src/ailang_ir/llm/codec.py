@@ -48,6 +48,7 @@ from ailang_ir.encoder.codebook import (
 from ailang_ir.normalize.vocabulary import NormalizationVocabulary
 from ailang_ir.llm.validator import validate_code
 
+import re
 
 _LLM_KEY_FILLERS = {
     "for", "of", "with", "about", "to", "in", "on", "at",
@@ -69,8 +70,6 @@ _SNIPPET_STOPWORDS = {
     "think", "believe", "feel", "know",
 }
 
-import re
-
 # Matches numbers with optional units (e.g., "6h", "30min", "$500", "99%")
 _NUMBER_PATTERN = re.compile(r'\$?\d+[\d,.]*\s*(?:%|hours?|hrs?|h|minutes?|mins?|min|seconds?|secs?|s|days?|d|weeks?|months?|years?|gb|mb|kb|tb|ms|k|m)?', re.IGNORECASE)
 
@@ -84,8 +83,6 @@ def _condense_source(text: str, max_words: int = 12) -> str:
     if not text:
         return ""
 
-    # Extract and protect numbers+units first
-    numbers = _NUMBER_PATTERN.findall(text)
     # Remove sentence-ending punctuation, keep internal punctuation
     cleaned = text.strip().rstrip(".")
 
