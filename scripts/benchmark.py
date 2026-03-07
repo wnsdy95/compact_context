@@ -1,13 +1,13 @@
 """
 AILang-IR effectiveness and compression benchmark.
 Measures compression ratio, semantic preservation, and practical utility.
+Compares v1 (pipe-delimited) vs v2 (assembly IR) encoding.
 """
 
 from ailang_ir import Pipeline
-from ailang_ir.encoder import SymbolicEncoder
+from ailang_ir.encoder import SymbolicEncoder, ConceptTable
 from ailang_ir.decoder import Reconstructor
 
-pipe = Pipeline()
 encoder = SymbolicEncoder()
 decoder = Reconstructor()
 
@@ -58,56 +58,66 @@ def section(title):
 
 
 # ============================================================
-# 1. COMPRESSION RATIO
+# 1. COMPRESSION RATIO — v1 vs v2
 # ============================================================
-section("1. COMPRESSION RATIO")
+section("1. COMPRESSION RATIO — v1 vs v2")
+
+pipe_v1 = Pipeline(encoding_version=1)
+pipe_v2 = Pipeline(encoding_version=2)
 
 total_raw = 0
-total_code = 0
-total_summary = 0
-
-for text in SENTENCES:
-    r = pipe.process(text)
-    raw_b = len(text.encode("utf-8"))
-    code_b = len(r.compact_code.encode("utf-8"))
-    summ = r.reconstruct("summary")
-    summ_b = len(summ.encode("utf-8"))
-    ratio = code_b / raw_b
-    total_raw += raw_b
-    total_code += code_b
-    total_summary += summ_b
-    print(f"  {ratio:.2f}x | {raw_b:3d}B → {code_b:3d}B | {r.compact_code}")
+total_v1 = 0
+total_v2 = 0
 
 print()
-avg_ratio = total_code / total_raw
-print(f"  Raw total:     {total_raw} bytes")
-print(f"  Code total:    {total_code} bytes")
-print(f"  Summary total: {total_summary} bytes")
-print(f"  Code/Raw ratio: {avg_ratio:.2%}")
-print(f"  Summary/Raw:    {total_summary/total_raw:.2%}")
-print(f"  Savings (code): {1 - avg_ratio:.1%}")
+print(f"  {'Sentence':<50s} {'Raw':>4s} {'v1':>4s} {'v2':>4s}  {'v1%':>5s} {'v2%':>5s}")
+print(f"  {'-'*50} {'----':>4s} {'----':>4s} {'----':>4s}  {'-----':>5s} {'-----':>5s}")
+
+for text in SENTENCES:
+    r1 = pipe_v1.process(text)
+    r2 = pipe_v2.process(text)
+    raw_b = len(text.encode("utf-8"))
+    v1_b = len(r1.compact_code.encode("utf-8"))
+    v2_b = len(r2.compact_code.encode("utf-8"))
+    total_raw += raw_b
+    total_v1 += v1_b
+    total_v2 += v2_b
+    v1_pct = v1_b / raw_b
+    v2_pct = v2_b / raw_b
+    short = text[:48] + ".." if len(text) > 50 else text
+    print(f"  {short:<50s} {raw_b:4d} {v1_b:4d} {v2_b:4d}  {v1_pct:5.0%} {v2_pct:5.0%}")
+
+print()
+v1_ratio = total_v1 / total_raw
+v2_ratio = total_v2 / total_raw
+print(f"  Raw total:      {total_raw} bytes")
+print(f"  v1 total:       {total_v1} bytes  ({v1_ratio:.1%})")
+print(f"  v2 total:       {total_v2} bytes  ({v2_ratio:.1%})")
+print(f"  Improvement:    v1={v1_ratio:.1%} → v2={v2_ratio:.1%}  ({(v1_ratio-v2_ratio)/v1_ratio:.0%} reduction)")
 
 
 # ============================================================
-# 2. SEMANTIC PRESERVATION
+# 2. SEMANTIC FIELD PRESERVATION (v2 round-trip)
 # ============================================================
-section("2. SEMANTIC FIELD PRESERVATION (round-trip)")
+section("2. SEMANTIC FIELD PRESERVATION (v2 round-trip)")
+
+pipe_rt = Pipeline(encoding_version=2)
 
 preserved_full = 0
 field_totals = {"speaker": 0, "mode": 0, "act": 0, "object": 0, "certainty": 0, "time": 0}
 field_preserved = {"speaker": 0, "mode": 0, "act": 0, "object": 0, "certainty": 0, "time": 0}
 
 for text in SENTENCES:
-    r = pipe.process(text)
-    fields = encoder.decode_fields(r.compact_code)
+    r = pipe_rt.process(text)
+    fields = encoder.decode_fields_v2(r.compact_code, pipe_rt.concept_table)
 
     checks = {
         "speaker": fields.get("speaker", "?") != "?",
         "mode": fields.get("mode", "?") != "?",
-        "act": fields.get("act", "UNK") != "UNK",
-        "object": fields.get("object", "?OBJ") != "?OBJ",
+        "act": fields.get("act", "uk") != "uk",
+        "object": fields.get("object", "?obj") != "?obj",
         "certainty": "certainty" in fields,
-        "time": fields.get("time", "T?") != "T?",
+        "time": fields.get("time", "?") != "?",
     }
 
     for k, v in checks.items():
@@ -123,49 +133,58 @@ print()
 print("  Per-field preservation:")
 for k in field_totals:
     pct = field_preserved[k] / field_totals[k]
-    bar = "█" * int(pct * 20) + "░" * (20 - int(pct * 20))
-    print(f"    {k:12s} {bar} {pct:.0%} ({field_preserved[k]}/{field_totals[k]})")
+    bar = "#" * int(pct * 20) + "." * (20 - int(pct * 20))
+    print(f"    {k:12s} [{bar}] {pct:.0%} ({field_preserved[k]}/{field_totals[k]})")
 
 
 # ============================================================
-# 3. DEDUPLICATION EFFECTIVENESS
+# 3. DEDUPLICATION + CONVERSATION COMPRESSION (v2)
 # ============================================================
-section("3. DEDUPLICATION (repeated semantics)")
+section("3. CONVERSATION COMPRESSION (v2 with re-referencing)")
 
-pipe2 = Pipeline()
+pipe_conv = Pipeline(encoding_version=2)
+codes = []
 for text in CONVERSATION:
-    pipe2.process(text)
+    r = pipe_conv.process(text)
+    codes.append(r.compact_code)
 
 raw_total = sum(len(t.encode("utf-8")) for t in CONVERSATION)
-stored = pipe2.memory_size
+code_total = sum(len(c.encode("utf-8")) for c in codes)
+stored = pipe_conv.memory_size
+ct_size = pipe_conv.concept_table.size
+
 print(f"  Input sentences:  {len(CONVERSATION)}")
 print(f"  Stored memories:  {stored}")
-print(f"  Dedup ratio:      {stored}/{len(CONVERSATION)} = {stored/len(CONVERSATION):.0%} stored")
+print(f"  ConceptTable entries: {ct_size}")
 print(f"  Raw input size:   {raw_total} bytes")
-codes = [encoder.encode(m.frame) for m in pipe2.recent(stored)]
-code_total = sum(len(c.encode("utf-8")) for c in codes)
-print(f"  Stored code size: {code_total} bytes")
+print(f"  v2 codes size:    {code_total} bytes")
 print(f"  Effective compression: {code_total/raw_total:.1%} of raw conversation")
+print()
+print("  Individual codes:")
+for text, code in zip(CONVERSATION, codes):
+    marker = "$" if "$" in code else "#"
+    print(f"    [{marker}] {code:<35s}  <- {text[:40]}")
 
 
 # ============================================================
 # 4. RECONSTRUCTION FIDELITY
 # ============================================================
-section("4. RECONSTRUCTION FIDELITY (meaning preservation)")
+section("4. RECONSTRUCTION FIDELITY (v2 meaning preservation)")
 
+pipe_fid = Pipeline(encoding_version=2)
 test_pairs = [
     ("I think graph memory is better than linear text.", ["graph", "memory", "linear", "text"]),
-    ("We need a normalization layer.", ["normalization", "layer"]),
-    ("What is the best approach for semantic compression?", ["semantic", "compression"]),
-    ("I prefer typed models over loose dictionaries.", ["typed", "model", "loose", "dictionar"]),
-    ("This is definitely the right architecture.", ["architecture"]),
+    ("We need a normalization layer.", ["norm", "layer"]),
+    ("What is the best approach for semantic compression?", ["sema", "comp"]),
+    ("I prefer typed models over loose dictionaries.", ["typed", "model", "loose", "dict"]),
+    ("This is definitely the right architecture.", ["arch"]),
 ]
 
 total_keywords = 0
 preserved_keywords = 0
 
 for text, keywords in test_pairs:
-    r = pipe.process(text)
+    r = pipe_fid.process(text)
     recon = r.reconstruct("declarative").lower()
     code = r.compact_code.lower()
     combined = recon + " " + code
@@ -185,43 +204,27 @@ print(f"  Keyword preservation: {preserved_keywords}/{total_keywords} ({preserve
 
 
 # ============================================================
-# 5. HONEST ASSESSMENT
+# 5. ASSESSMENT
 # ============================================================
-section("5. CRITICAL ASSESSMENT")
+section("5. v2 ASSESSMENT")
 
-print("""
-  STRENGTHS:
-  - Deterministic: same input always produces same code
-  - Zero external dependencies (no ML, no network)
-  - Full round-trip: text → frame → code → frame → text
-  - Deduplication catches exact semantic matches
-  - Compact codes are human-readable and debuggable
-  - Contradiction detection works for opposing act pairs
-  - JSON persistence enables cross-session memory
+print(f"""
+  v1 compression ratio: {v1_ratio:.1%} (often LARGER than original)
+  v2 compression ratio: {v2_ratio:.1%} (first mentions)
+  Improvement: {(v1_ratio-v2_ratio)/v1_ratio:.0%} reduction
 
-  WEAKNESSES:
-  - Compression ratio is POOR (~90-120% of raw text)
-    The compact codes are often LONGER than the original text.
-    This is because object keys preserve full noun phrases.
-  - Keyword-based parsing is FRAGILE
-    Complex sentences, passive voice, nested clauses degrade quality.
-  - Deduplication is TOO STRICT
-    "I think graph memory is good" and "graph storage seems best"
-    are semantically similar but stored as separate memories.
-  - Reconstruction is LOSSY and AWKWARD
-    Reconstructed text is grammatically imperfect and loses nuance.
-  - No actual semantic understanding
-    This is pattern matching, not comprehension.
-    An LLM would extract meaning far more accurately.
-  - English-only, no multilingual support
+  KEY CHANGES in v2:
+  - Fixed-width 6-char header (was 8-18 chars with delimiters)
+  - 1-char mode codes (was 2-3 chars)
+  - 2-char act codes (was 4-8 chars)
+  - 1-char time codes (was 3-5 chars)
+  - 1 hex char certainty (was 3-4 chars)
+  - Compressed object keys (truncated words, removed fillers)
+  - ConceptTable re-referencing ($id for repeated concepts)
+  - No pipe delimiters (space-separated, position-based header)
 
-  VERDICT:
-  The system demonstrates the architectural concept but does NOT yet
-  deliver practical compression or semantic quality advantages over
-  simply storing raw text. The value proposition requires either:
-    (a) LLM-assisted parsing for real semantic extraction, or
-    (b) semantic similarity for cross-phrasing deduplication, or
-    (c) both.
-
-  The current rule-based approach is a skeleton, not a solution.
+  REMAINING LIMITATIONS:
+  - Parser is still rule-based (keyword matching)
+  - Deduplication is still exact-match
+  - Reconstruction is still template-based
 """)

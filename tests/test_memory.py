@@ -1,6 +1,7 @@
 """Tests for memory store."""
 
 from ailang_ir.memory import MemoryStore
+from ailang_ir.encoder.concept_table import ConceptTable
 from ailang_ir.models.domain import (
     Certainty,
     Entity,
@@ -169,7 +170,7 @@ class TestPersistence:
         store.save(path)
         assert path.exists()
 
-        loaded = MemoryStore.load(path)
+        loaded, _ct = MemoryStore.load(path)
         assert loaded.size == 2
         assert loaded.active_count == 2
         assert len(loaded.get_edges_for("concept_a")) == 1
@@ -182,7 +183,7 @@ class TestPersistence:
 
         path = tmp_path / "test.json"
         store.save(path)
-        loaded = MemoryStore.load(path)
+        loaded, _ct = MemoryStore.load(path)
 
         loaded_mem = loaded.get(mem.memory_id)
         assert loaded_mem is not None
@@ -198,7 +199,7 @@ class TestPersistence:
 
         path = tmp_path / "test.json"
         store.save(path)
-        loaded = MemoryStore.load(path)
+        loaded, _ct = MemoryStore.load(path)
 
         assert loaded.size == 2
         assert loaded.active_count == 1
@@ -207,5 +208,32 @@ class TestPersistence:
         store = MemoryStore()
         path = tmp_path / "empty.json"
         store.save(path)
-        loaded = MemoryStore.load(path)
+        loaded, _ct = MemoryStore.load(path)
         assert loaded.size == 0
+
+    def test_concept_table_persistence(self, tmp_path):
+        store = MemoryStore()
+        store.store(_make_frame(SemanticAct.BELIEVE, "concept_a"))
+        ct = ConceptTable()
+        ct.define("alpha")
+        ct.define("beta")
+
+        path = tmp_path / "with_ct.json"
+        store.save(path, concept_table=ct)
+
+        loaded_store, loaded_ct = MemoryStore.load(path)
+        assert loaded_store.size == 1
+        assert loaded_ct is not None
+        assert loaded_ct.size == 2
+        assert loaded_ct.lookup("alpha") == 0
+        assert loaded_ct.lookup("beta") == 1
+
+    def test_v1_file_loads_without_concept_table(self, tmp_path):
+        store = MemoryStore()
+        store.store(_make_frame(SemanticAct.BELIEVE, "test"))
+        path = tmp_path / "v1.json"
+        # Save without concept_table (simulates v1)
+        store.save(path)
+        loaded_store, loaded_ct = MemoryStore.load(path)
+        assert loaded_store.size == 1
+        assert loaded_ct is None

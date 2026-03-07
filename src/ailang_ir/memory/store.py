@@ -31,6 +31,7 @@ from ailang_ir.models.domain import (
     SpeakerRole,
     TimeReference,
 )
+from ailang_ir.encoder.concept_table import ConceptTable
 
 
 @dataclass
@@ -276,23 +277,33 @@ class MemoryStore:
     # Persistence — JSON file save/load
     # -------------------------------------------------------------------
 
-    def save(self, path: str | Path) -> None:
+    def save(
+        self, path: str | Path,
+        concept_table: ConceptTable | None = None,
+    ) -> None:
         """Save the entire memory store to a JSON file."""
         path = Path(path)
-        data = {
-            "version": 1,
+        data: dict[str, Any] = {
+            "version": 2,
             "memories": {
                 mid: _serialize_memory(mem)
                 for mid, mem in self._memories.items()
             },
             "edges": [_serialize_edge(e) for e in self._edges],
         }
+        if concept_table is not None:
+            data["concept_table"] = concept_table.dump()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
 
     @classmethod
-    def load(cls, path: str | Path) -> "MemoryStore":
-        """Load a memory store from a JSON file."""
+    def load(
+        cls, path: str | Path,
+    ) -> tuple["MemoryStore", ConceptTable | None]:
+        """Load a memory store from a JSON file.
+
+        Returns (store, concept_table). concept_table is None for v1 files.
+        """
         path = Path(path)
         data = json.loads(path.read_text(encoding="utf-8"))
         store = cls()
@@ -302,7 +313,10 @@ class MemoryStore:
             store._index_memory(mem)
         for edge_data in data.get("edges", []):
             store._edges.append(_deserialize_edge(edge_data))
-        return store
+        ct = None
+        if "concept_table" in data:
+            ct = ConceptTable.from_dump(data["concept_table"])
+        return store, ct
 
 
 # ---------------------------------------------------------------------------

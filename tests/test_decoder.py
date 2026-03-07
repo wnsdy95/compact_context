@@ -1,6 +1,7 @@
 """Tests for natural language reconstructor."""
 
 from ailang_ir.decoder import Reconstructor
+from ailang_ir.encoder import SymbolicEncoder, ConceptTable
 from ailang_ir.models.domain import (
     Certainty,
     Entity,
@@ -89,3 +90,77 @@ class TestReconstructor:
         # Low certainty should produce a qualifier
         lower = text.lower()
         assert "maybe" in lower or "possibly" in lower or "perhaps" in lower
+
+
+class TestReconstructorV2:
+    def setup_method(self):
+        self.recon = Reconstructor()
+        self.encoder = SymbolicEncoder()
+
+    def test_reconstruct_from_v2_code(self):
+        ct = ConceptTable()
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("test_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, ct)
+        text = self.recon.reconstruct_from_code(code, "declarative", ct)
+        assert len(text) > 0
+
+    def test_v2_round_trip_meaning(self):
+        ct = ConceptTable()
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("semantic_frames"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, ct)
+        text = self.recon.reconstruct_from_code(code, "declarative", ct)
+        lower = text.lower()
+        assert "think" in lower or "semantic" in lower or "sema" in lower
+
+    def test_v2_with_target_round_trip(self):
+        ct = ConceptTable()
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.PREFER),
+            object=Entity("graph_memory"),
+            target=Entity("linear_text"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, ct)
+        text = self.recon.reconstruct_from_code(code, "declarative", ct)
+        assert len(text) > 0
+
+    def test_v2_reref_decode(self):
+        """Re-referenced concept ($id) should decode correctly."""
+        ct = ConceptTable()
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("important_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        # First encode defines it
+        self.encoder.encode_v2(frame, ct)
+        # Second encode re-references
+        code2 = self.encoder.encode_v2(frame, ct)
+        assert "$" in code2
+        text = self.recon.reconstruct_from_code(code2, "declarative", ct)
+        assert len(text) > 0
+
+    def test_v1_code_still_works(self):
+        """v1 pipe-delimited code should still work without concept_table."""
+        text = self.recon.reconstruct_from_code("U|OP|BELIEVE|TEST_CONCEPT|C84|NOW")
+        assert "test concept" in text.lower()

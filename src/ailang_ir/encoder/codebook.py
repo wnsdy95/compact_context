@@ -21,6 +21,8 @@ from ailang_ir.models.domain import (
     SemanticAct,
     TimeReference,
 )
+from ailang_ir.encoder.concept_table import ConceptTable
+from ailang_ir.normalize.vocabulary import NormalizationVocabulary
 
 
 # ---------------------------------------------------------------------------
@@ -180,3 +182,185 @@ class SymbolicEncoder:
         if code.startswith("C") and code[1:].isdigit():
             return int(code[1:]) / 100.0
         return 0.5
+
+    # -------------------------------------------------------------------
+    # v2 encoding: fixed-width header + concept references
+    # -------------------------------------------------------------------
+
+    def encode_v2(self, frame: SemanticFrame, concept_table: ConceptTable) -> str:
+        """
+        Encode a SemanticFrame into v2 compact form.
+
+        Format: HEADER OBJECT [>TARGET]
+        Header = S M AA C T (6 chars, fixed position, no delimiters)
+        """
+        vocab = NormalizationVocabulary()
+
+        # Header: S(1) M(1) AA(2) C(1) T(1) = 6 chars
+        s = SPEAKER_CODES.get(frame.speaker, "?")
+        m = MODE_CODES_V2.get(frame.mode, "?")
+        aa = ACT_CODES_V2.get(frame.act, "uk")
+        c = _certainty_to_hex(frame.certainty.value)
+        t = TIME_CODES_V2.get(frame.time, "?")
+        header = f"{s}{m}{aa}{c}{t}"
+
+        # Object
+        if frame.object:
+            compressed = vocab.compress_object_key(frame.object.canonical)
+            obj_ref = concept_table.ref(compressed)
+        else:
+            obj_ref = "#?obj"
+
+        parts = [header, obj_ref]
+
+        # Target
+        if frame.target:
+            compressed_t = vocab.compress_object_key(frame.target.canonical)
+            tgt_ref = concept_table.ref(compressed_t)
+            parts.append(f">{tgt_ref}")
+
+        return " ".join(parts)
+
+    def decode_fields_v2(self, code: str, concept_table: ConceptTable) -> dict[str, str]:
+        """
+        Decode a v2 compact code back into named fields.
+
+        Returns dict with keys: speaker, mode, act, object, target (optional),
+        certainty, time.
+        """
+        tokens = code.split()
+        if len(tokens) < 2:
+            raise ValueError(f"Invalid v2 code (too few tokens): {code}")
+
+        header = tokens[0]
+        if len(header) != 6:
+            raise ValueError(f"Invalid v2 header length: {header}")
+
+        result: dict[str, str] = {}
+        result["speaker"] = header[0]
+        result["mode"] = header[1]
+        result["act"] = header[2:4]
+        result["certainty"] = header[4]
+        result["time"] = header[5]
+
+        # Resolve object reference
+        obj_token = tokens[1]
+        result["object"] = _resolve_ref(obj_token, concept_table)
+
+        # Check for target
+        if len(tokens) >= 3 and tokens[2].startswith(">"):
+            tgt_token = tokens[2][1:]  # strip ">"
+            result["target"] = _resolve_ref(tgt_token, concept_table)
+
+        return result
+
+    def disassemble(self, code: str, concept_table: ConceptTable) -> str:
+        """
+        Human-readable debug disassembly of a v2 code.
+
+        Example output:
+          Speaker: USER | Mode: OPINION | Act: BELIEVE | Cert: 70% | Time: PRESENT
+          Object: 1to1_sent_map_diff (#0)
+        """
+        fields = self.decode_fields_v2(code, concept_table)
+        speaker = SPEAKER_DECODE.get(fields["speaker"], SpeakerRole.UNKNOWN)
+        mode = MODE_DECODE_V2.get(fields["mode"], SemanticMode.ASSERTION)
+        act = ACT_DECODE_V2.get(fields["act"], SemanticAct.UNKNOWN)
+        cert = _hex_to_certainty(fields["certainty"])
+        time = TIME_DECODE_V2.get(fields["time"], TimeReference.UNKNOWN)
+
+        lines = [
+            f"Speaker: {speaker.value.upper()} | Mode: {mode.value.upper()} | "
+            f"Act: {act.value.upper()} | Cert: {int(cert*100)}% | Time: {time.value.upper()}",
+            f"Object: {fields['object']}",
+        ]
+        if "target" in fields:
+            lines.append(f"Target: {fields['target']}")
+        return "\n".join(lines)
+
+    # v2 enum decoders
+    def decode_mode_v2(self, code: str) -> SemanticMode:
+        return MODE_DECODE_V2.get(code, SemanticMode.ASSERTION)
+
+    def decode_act_v2(self, code: str) -> SemanticAct:
+        return ACT_DECODE_V2.get(code, SemanticAct.UNKNOWN)
+
+    def decode_time_v2(self, code: str) -> TimeReference:
+        return TIME_DECODE_V2.get(code, TimeReference.UNKNOWN)
+
+
+# ---------------------------------------------------------------------------
+# v2 codebook mappings
+# ---------------------------------------------------------------------------
+
+MODE_CODES_V2: dict[SemanticMode, str] = {
+    SemanticMode.ASSERTION: "a",
+    SemanticMode.OPINION: "o",
+    SemanticMode.HYPOTHESIS: "h",
+    SemanticMode.REQUEST: "r",
+    SemanticMode.COMMAND: "c",
+    SemanticMode.QUESTION: "q",
+    SemanticMode.COMMITMENT: "k",
+    SemanticMode.OBSERVATION: "b",
+    SemanticMode.REFLECTION: "f",
+}
+
+ACT_CODES_V2: dict[SemanticAct, str] = {
+    SemanticAct.BELIEVE: "bl",
+    SemanticAct.PREFER: "pr",
+    SemanticAct.SUGGEST: "sg",
+    SemanticAct.NEED: "nd",
+    SemanticAct.DECIDE: "dc",
+    SemanticAct.REJECT: "rj",
+    SemanticAct.AGREE: "ag",
+    SemanticAct.DISAGREE: "dg",
+    SemanticAct.CREATE: "cr",
+    SemanticAct.MODIFY: "md",
+    SemanticAct.DELETE: "dl",
+    SemanticAct.QUERY: "qu",
+    SemanticAct.OBSERVE: "ob",
+    SemanticAct.COMPARE: "cm",
+    SemanticAct.PLAN: "pl",
+    SemanticAct.WARN: "wn",
+    SemanticAct.EXPLAIN: "ex",
+    SemanticAct.UNKNOWN: "uk",
+}
+
+TIME_CODES_V2: dict[TimeReference, str] = {
+    TimeReference.PAST: "p",
+    TimeReference.PRESENT: "n",
+    TimeReference.FUTURE: "f",
+    TimeReference.ATEMPORAL: "a",
+    TimeReference.UNKNOWN: "?",
+}
+
+# Reverse mappings for v2
+MODE_DECODE_V2 = {v: k for k, v in MODE_CODES_V2.items()}
+ACT_DECODE_V2 = {v: k for k, v in ACT_CODES_V2.items()}
+TIME_DECODE_V2 = {v: k for k, v in TIME_CODES_V2.items()}
+
+
+def _certainty_to_hex(value: float) -> str:
+    """Convert certainty 0.0–1.0 to a single hex char (0–f, 16 levels)."""
+    level = min(15, max(0, int(value * 15.999)))
+    return format(level, "x")
+
+
+def _hex_to_certainty(h: str) -> float:
+    """Convert a single hex char back to certainty 0.0–1.0."""
+    level = int(h, 16)
+    return level / 15.0
+
+
+def _resolve_ref(token: str, concept_table: ConceptTable) -> str:
+    """Resolve a #key or $id reference to the concept key."""
+    if token.startswith("#"):
+        return token[1:]
+    elif token.startswith("$"):
+        from ailang_ir.encoder.concept_table import decode_id
+        cid = decode_id(token[1:])
+        resolved = concept_table.resolve(cid)
+        if resolved is None:
+            return f"?unresolved({token})"
+        return resolved
+    return token

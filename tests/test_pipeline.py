@@ -1,6 +1,7 @@
 """Tests for unified Pipeline API."""
 
 from ailang_ir import Pipeline
+from ailang_ir.encoder.concept_table import ConceptTable
 from ailang_ir.models.domain import SemanticAct, SemanticMode, SpeakerRole
 
 
@@ -86,3 +87,67 @@ class TestPipeline:
         dump = self.pipe.dump_memory()
         assert len(dump) == 1
         assert "memory_id" in dump[0]
+
+
+class TestPipelineV2:
+    def test_v2_produces_no_pipes(self):
+        pipe = Pipeline(encoding_version=2)
+        r = pipe.process("I think semantic frames are important.")
+        assert "|" not in r.compact_code
+
+    def test_v2_shorter_than_v1(self):
+        pipe_v1 = Pipeline(encoding_version=1)
+        pipe_v2 = Pipeline(encoding_version=2)
+        text = "I think one-to-one sentence mapping will be difficult."
+        r1 = pipe_v1.process(text)
+        r2 = pipe_v2.process(text)
+        assert len(r2.compact_code) < len(r1.compact_code)
+
+    def test_v2_concept_table_grows(self):
+        pipe = Pipeline(encoding_version=2)
+        pipe.process("I think semantic frames are important.")
+        pipe.process("We need better storage mechanisms.")
+        assert pipe.concept_table.size >= 2
+
+    def test_v2_reref_uses_dollar_id(self):
+        pipe = Pipeline(encoding_version=2)
+        r1 = pipe.process("I think graph memory is good.")
+        # Process the exact same text again to guarantee same object key
+        r2 = pipe.process("I think graph memory is good.", speaker=SpeakerRole.SYSTEM)
+        # The same concept should be re-referenced with $id in second code
+        assert "$" in r2.compact_code
+
+    def test_v2_reconstruct_from_result(self):
+        pipe = Pipeline(encoding_version=2)
+        r = pipe.process("I think semantic frames are important.")
+        text = r.reconstruct()
+        assert len(text) > 0
+
+    def test_v2_decode(self):
+        pipe = Pipeline(encoding_version=2)
+        r = pipe.process("I think semantic frames are important.")
+        decoded = pipe.decode(r.compact_code)
+        assert len(decoded) > 0
+
+    def test_v1_backward_compat(self):
+        pipe = Pipeline(encoding_version=1)
+        r = pipe.process("I think semantic frames are important.")
+        assert "|" in r.compact_code
+        assert r.concept_table is None
+
+    def test_v2_multi_sentence(self):
+        pipe = Pipeline(encoding_version=2)
+        results = pipe.process_multi(
+            "I think this is good. We need better storage."
+        )
+        assert len(results) == 2
+        for r in results:
+            assert "|" not in r.compact_code
+
+    def test_v2_batch(self):
+        pipe = Pipeline(encoding_version=2)
+        texts = ["We need storage.", "Let's build a parser."]
+        results = pipe.process_batch(texts)
+        assert len(results) == 2
+        for r in results:
+            assert "|" not in r.compact_code

@@ -16,6 +16,7 @@ from ailang_ir.models.domain import (
 )
 from ailang_ir.parser.rule_parser import RuleBasedParser
 from ailang_ir.encoder.codebook import SymbolicEncoder
+from ailang_ir.encoder.concept_table import ConceptTable
 from ailang_ir.decoder.reconstructor import Reconstructor
 from ailang_ir.memory.store import MemoryStore
 
@@ -26,11 +27,13 @@ class ProcessResult:
     frame: SemanticFrame
     compact_code: str
     memory: EventMemory | None = None
+    concept_table: ConceptTable | None = None
 
     def reconstruct(self, style: str = "declarative") -> str:
         """Reconstruct natural language from the stored frame."""
-        # Lazy import to avoid circular dependency at module level
         r = Reconstructor()
+        if self.concept_table is not None and "|" not in self.compact_code:
+            return r.reconstruct_from_code(self.compact_code, style, self.concept_table)
         return r.reconstruct(self.frame, style)
 
     @property
@@ -58,6 +61,8 @@ class Pipeline:
     encoder: SymbolicEncoder = field(default_factory=SymbolicEncoder)
     decoder: Reconstructor = field(default_factory=Reconstructor)
     memory: MemoryStore = field(default_factory=MemoryStore)
+    concept_table: ConceptTable = field(default_factory=ConceptTable)
+    encoding_version: int = 2
     auto_store: bool = True  # automatically store frames in memory
 
     def process(
@@ -76,13 +81,19 @@ class Pipeline:
         4. Return ProcessResult
         """
         frame = self.parser.parse(text, speaker)
-        code = self.encoder.encode(frame)
+        if self.encoding_version >= 2:
+            code = self.encoder.encode_v2(frame, self.concept_table)
+        else:
+            code = self.encoder.encode(frame)
 
         mem = None
         if self.auto_store:
             mem = self.memory.store(frame, tags=tags)
 
-        return ProcessResult(frame=frame, compact_code=code, memory=mem)
+        return ProcessResult(
+            frame=frame, compact_code=code, memory=mem,
+            concept_table=self.concept_table if self.encoding_version >= 2 else None,
+        )
 
     def process_batch(
         self,
@@ -106,16 +117,22 @@ class Pipeline:
         frames = self.parser.parse_multi(text, speaker)
         results = []
         for frame in frames:
-            code = self.encoder.encode(frame)
+            if self.encoding_version >= 2:
+                code = self.encoder.encode_v2(frame, self.concept_table)
+            else:
+                code = self.encoder.encode(frame)
             mem = None
             if self.auto_store:
                 mem = self.memory.store(frame, tags=tags)
-            results.append(ProcessResult(frame=frame, compact_code=code, memory=mem))
+            results.append(ProcessResult(
+                frame=frame, compact_code=code, memory=mem,
+                concept_table=self.concept_table if self.encoding_version >= 2 else None,
+            ))
         return results
 
     def decode(self, code: str, style: str = "declarative") -> str:
         """Decode a compact code back to natural language."""
-        return self.decoder.reconstruct_from_code(code, style)
+        return self.decoder.reconstruct_from_code(code, style, self.concept_table)
 
     def search(self, entity_key: str) -> list[EventMemory]:
         """Search memory by entity key."""

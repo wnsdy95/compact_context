@@ -24,7 +24,8 @@ from ailang_ir.models.domain import (
     SpeakerRole,
     TimeReference,
 )
-from ailang_ir.encoder.codebook import SymbolicEncoder
+from ailang_ir.encoder.codebook import SymbolicEncoder, _hex_to_certainty
+from ailang_ir.encoder.concept_table import ConceptTable
 
 
 # ---------------------------------------------------------------------------
@@ -83,9 +84,11 @@ TIME_SUFFIXES: dict[TimeReference, str] = {
 
 
 def _key_to_phrase(key: str) -> str:
-    """Convert a normalized key back into a readable phrase.
+    """Convert a normalized or compressed key back into a readable phrase.
 
+    Handles both full keys and v2 compressed keys (truncated words).
     E.g. '1to1_sentence_mapping' → 'one-to-one sentence mapping'
+         '1to1_sent_map_diff' → 'one-to-one sent map diff'
     """
     text = key.lower()
     text = text.replace("1to1", "one-to-one")
@@ -124,9 +127,15 @@ class Reconstructor:
         else:
             return self._declarative_style(frame)
 
-    def reconstruct_from_code(self, code: str, style: str = "declarative") -> str:
-        """Reconstruct natural language from a compact symbolic code."""
-        frame = self._code_to_frame(code)
+    def reconstruct_from_code(
+        self, code: str, style: str = "declarative",
+        concept_table: ConceptTable | None = None,
+    ) -> str:
+        """Reconstruct natural language from a compact symbolic code (v1 or v2)."""
+        if _is_v2(code) and concept_table is not None:
+            frame = self._code_to_frame_v2(code, concept_table)
+        else:
+            frame = self._code_to_frame(code)
         return self.reconstruct(frame, style)
 
     def reconstruct_from_plan(self, plan: ReconstructionPlan) -> str:
@@ -297,7 +306,7 @@ class Reconstructor:
         return mapping.get(time, "present")
 
     def _code_to_frame(self, code: str) -> SemanticFrame:
-        """Convert a compact code back into a SemanticFrame for reconstruction."""
+        """Convert a v1 compact code back into a SemanticFrame for reconstruction."""
         fields = self.encoder.decode_fields(code)
 
         speaker = self.encoder.decode_speaker(fields.get("speaker", "?"))
@@ -321,3 +330,34 @@ class Reconstructor:
             time=time,
             certainty=Certainty(certainty_val),
         )
+
+    def _code_to_frame_v2(self, code: str, concept_table: ConceptTable) -> SemanticFrame:
+        """Convert a v2 compact code back into a SemanticFrame."""
+        fields = self.encoder.decode_fields_v2(code, concept_table)
+
+        speaker = self.encoder.decode_speaker(fields.get("speaker", "?"))
+        mode = self.encoder.decode_mode_v2(fields.get("mode", "a"))
+        act = self.encoder.decode_act_v2(fields.get("act", "uk"))
+        time = self.encoder.decode_time_v2(fields.get("time", "?"))
+        certainty_val = _hex_to_certainty(fields.get("certainty", "7"))
+
+        obj_key = fields.get("object", "")
+        obj_entity = Entity(canonical=obj_key) if obj_key and obj_key != "?obj" else None
+
+        target_key = fields.get("target")
+        target_entity = Entity(canonical=target_key) if target_key else None
+
+        return SemanticFrame(
+            speaker=speaker,
+            mode=mode,
+            predicate=Predicate(act),
+            object=obj_entity,
+            target=target_entity,
+            time=time,
+            certainty=Certainty(certainty_val),
+        )
+
+
+def _is_v2(code: str) -> bool:
+    """Detect whether a code string is v2 format (no pipes, space-separated)."""
+    return "|" not in code

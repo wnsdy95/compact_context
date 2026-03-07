@@ -292,3 +292,29 @@ class NormalizationVocabulary:
         tokens = re.split(r'[\s\-/]+', text)
         tokens = [t for t in tokens if t and t not in fillers]
         return "_".join(tokens)
+
+    def compress_object_key(self, raw: str) -> str:
+        """
+        Compress a normalized key into a shorter form for v2 encoding.
+
+        Rules:
+        1. Remove extended filler words (prepositions, etc.)
+        2. Truncate words longer than 7 chars to first 4 chars
+        3. Cap total length at 24 chars
+        """
+        # Start from normalized form
+        key = self.normalize_object_key(raw)
+        extended_fillers = {
+            "for", "of", "with", "about", "to", "in", "on", "at",
+            "from", "by", "than", "over", "into", "like", "between",
+            "through", "after", "before", "under", "against",
+        }
+        tokens = key.split("_")
+        tokens = [t for t in tokens if t not in extended_fillers]
+        # Truncate long words: >7 chars → first 4 chars
+        tokens = [t[:4] if len(t) > 7 else t for t in tokens]
+        result = "_".join(tokens)
+        # Cap at 24 chars
+        if len(result) > 24:
+            result = result[:24].rstrip("_")
+        return result

@@ -1,6 +1,7 @@
 """Tests for symbolic encoder."""
 
-from ailang_ir.encoder import SymbolicEncoder
+from ailang_ir.encoder import SymbolicEncoder, ConceptTable
+from ailang_ir.encoder.codebook import _certainty_to_hex, _hex_to_certainty
 from ailang_ir.models.domain import (
     Certainty,
     Entity,
@@ -103,3 +104,182 @@ class TestDecodeFields:
         assert fields["act"] == "BELIEVE"
         assert fields["object"] == "ROUND_TRIP_TEST"
         assert self.encoder.decode_certainty(fields["certainty"]) == 0.75
+
+
+class TestCertaintyHex:
+    def test_certainty_to_hex_boundaries(self):
+        assert _certainty_to_hex(0.0) == "0"
+        assert _certainty_to_hex(1.0) == "f"
+
+    def test_certainty_round_trip(self):
+        for h in "0123456789abcdef":
+            val = _hex_to_certainty(h)
+            assert 0.0 <= val <= 1.0
+            assert _certainty_to_hex(val) == h
+
+    def test_certainty_70_pct(self):
+        h = _certainty_to_hex(0.70)
+        recovered = _hex_to_certainty(h)
+        assert abs(recovered - 0.70) < 0.1
+
+
+class TestV2Encoder:
+    def setup_method(self):
+        self.encoder = SymbolicEncoder()
+        self.ct = ConceptTable()
+
+    def test_v2_basic_encode(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("test_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        # Header: U + o + bl + hex(0.70) + n
+        assert code.startswith("Uobl")
+        assert "#test_concept" in code or "#test_conc" in code
+        assert "|" not in code  # no pipes in v2
+
+    def test_v2_encode_with_target(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.PREFER),
+            object=Entity("graph_memory"),
+            target=Entity("linear_text"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        assert ">" in code
+
+    def test_v2_header_length(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("x"),
+            certainty=Certainty(0.5),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        header = code.split()[0]
+        assert len(header) == 6
+
+    def test_v2_shorter_than_v1(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("1to1_sentence_mapping_difficult"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        v1 = self.encoder.encode(frame)
+        v2 = self.encoder.encode_v2(frame, self.ct)
+        assert len(v2) < len(v1)
+
+    def test_v2_reref_shorter(self):
+        """Re-referencing the same concept should use $id form."""
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("some_long_concept_name"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code1 = self.encoder.encode_v2(frame, self.ct)
+        code2 = self.encoder.encode_v2(frame, self.ct)
+        assert "#" in code1  # first mention defines
+        assert "$" in code2  # second mention references
+        assert len(code2) < len(code1)
+
+    def test_v2_decode_fields(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("test_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        fields = self.encoder.decode_fields_v2(code, self.ct)
+        assert fields["speaker"] == "U"
+        assert fields["mode"] == "o"
+        assert fields["act"] == "bl"
+        assert fields["time"] == "n"
+        assert "object" in fields
+
+    def test_v2_decode_with_target(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.PREFER),
+            object=Entity("typed_models"),
+            target=Entity("loose_dictionaries"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        fields = self.encoder.decode_fields_v2(code, self.ct)
+        assert "target" in fields
+
+    def test_v2_disassemble(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("test_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v2(frame, self.ct)
+        debug = self.encoder.disassemble(code, self.ct)
+        assert "OPINION" in debug
+        assert "BELIEVE" in debug
+        assert "PRESENT" in debug
+
+    def test_v2_all_acts(self):
+        """All acts should encode to 2-char codes."""
+        for act in SemanticAct:
+            frame = SemanticFrame(
+                predicate=Predicate(act),
+                object=Entity(f"obj_{act.value}"),
+            )
+            ct = ConceptTable()
+            code = self.encoder.encode_v2(frame, ct)
+            header = code.split()[0]
+            assert len(header) == 6
+
+    def test_v2_all_modes(self):
+        """All modes should encode to 1-char codes."""
+        for mode in SemanticMode:
+            frame = SemanticFrame(
+                mode=mode,
+                predicate=Predicate(SemanticAct.BELIEVE),
+                object=Entity(f"obj_{mode.value}"),
+            )
+            ct = ConceptTable()
+            code = self.encoder.encode_v2(frame, ct)
+            header = code.split()[0]
+            assert len(header) == 6
+
+    def test_v2_deterministic(self):
+        ct1 = ConceptTable()
+        ct2 = ConceptTable()
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.SUGGEST),
+            object=Entity("approach"),
+            certainty=Certainty(0.6),
+            time=TimeReference.FUTURE,
+        )
+        code1 = self.encoder.encode_v2(frame, ct1)
+        code2 = self.encoder.encode_v2(frame, ct2)
+        assert code1 == code2
