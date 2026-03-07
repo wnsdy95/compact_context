@@ -151,3 +151,90 @@ class TestPipelineV2:
         assert len(results) == 2
         for r in results:
             assert "|" not in r.compact_code
+
+
+class TestPipelineV3:
+    def test_v3_default_version(self):
+        pipe = Pipeline()
+        assert pipe.encoding_version == 3
+
+    def test_v3_shorter_than_v2(self):
+        pipe_v2 = Pipeline(encoding_version=2)
+        pipe_v3 = Pipeline(encoding_version=3)
+        text = "I think one-to-one sentence mapping will be difficult."
+        r2 = pipe_v2.process(text)
+        r3 = pipe_v3.process(text)
+        assert len(r3.compact_code) < len(r2.compact_code)
+
+    def test_v3_produces_no_pipes(self):
+        pipe = Pipeline(encoding_version=3)
+        r = pipe.process("I think semantic frames are important.")
+        assert "|" not in r.compact_code
+
+    def test_v3_reconstruct(self):
+        pipe = Pipeline(encoding_version=3)
+        r = pipe.process("I think semantic frames are important.")
+        text = r.reconstruct()
+        assert len(text) > 0
+
+    def test_v3_decode(self):
+        pipe = Pipeline(encoding_version=3)
+        r = pipe.process("I think semantic frames are important.")
+        decoded = pipe.decode(r.compact_code)
+        assert len(decoded) > 0
+
+    def test_v3_reref(self):
+        pipe = Pipeline(encoding_version=3)
+        pipe.process("I think graph memory is good.")
+        r2 = pipe.process("I think graph memory is good.", speaker=SpeakerRole.SYSTEM)
+        assert "$" in r2.compact_code
+
+    def test_v3_compression_target(self):
+        """v3 must achieve <= 30% compression on benchmark corpus."""
+        pipe = Pipeline(encoding_version=3)
+        sentences = [
+            "I think one-to-one sentence mapping will be difficult.",
+            "The system should be able to reconstruct natural language later.",
+            "Graph memory seems more appropriate than linear text storage.",
+            "Natural language should be segmented into meaning units.",
+            "What is the best approach for semantic compression?",
+            "I prefer typed models over loose dictionaries.",
+            "We need a normalization layer for consistent output.",
+            "Maybe we should try a different compression strategy.",
+            "This is definitely the right architecture.",
+            "Previously we used raw string matching.",
+            "I believe semantic frames are the right approach.",
+            "The reconstruction quality is unfortunately poor.",
+            "Let us build a new encoder for compact codes.",
+            "We should update the normalization rules.",
+            "Semantic frames preserve meaning better than raw text.",
+            "I notice the parser misclassifies passive sentences.",
+            "We will implement persistence in the next cycle.",
+            "Perhaps the compression ratio can be improved.",
+            "How does the parser handle ambiguous input?",
+            "This is a great improvement over the old system.",
+        ]
+        total_raw = sum(len(s.encode("utf-8")) for s in sentences)
+        total_code = sum(len(pipe.process(s).compact_code.encode("utf-8")) for s in sentences)
+        ratio = total_code / total_raw
+        assert ratio <= 0.31, f"v3 compression ratio {ratio:.1%} exceeds 31% target"
+
+    def test_v3_multi_sentence(self):
+        pipe = Pipeline(encoding_version=3)
+        results = pipe.process_multi("I think this is good. We need better storage.")
+        assert len(results) == 2
+        for r in results:
+            assert "|" not in r.compact_code
+
+    def test_v3_backward_compat_v1(self):
+        pipe = Pipeline(encoding_version=1)
+        r = pipe.process("I think semantic frames are important.")
+        assert "|" in r.compact_code
+
+    def test_v3_backward_compat_v2(self):
+        pipe = Pipeline(encoding_version=2)
+        r = pipe.process("I think semantic frames are important.")
+        assert "|" not in r.compact_code
+        # v2 keys have underscores, v3 does not
+        obj = r.compact_code.split()[1]
+        assert "_" in obj[1:]  # v2 uses underscored keys

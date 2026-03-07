@@ -283,3 +283,119 @@ class TestV2Encoder:
         code1 = self.encoder.encode_v2(frame, ct1)
         code2 = self.encoder.encode_v2(frame, ct2)
         assert code1 == code2
+
+
+class TestV3Encoder:
+    def setup_method(self):
+        self.encoder = SymbolicEncoder()
+        self.ct = ConceptTable()
+
+    def test_v3_shorter_than_v2(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("1to1_sentence_mapping_difficult"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        ct_v2 = ConceptTable()
+        v2 = self.encoder.encode_v2(frame, ct_v2)
+        v3 = self.encoder.encode_v3(frame, self.ct)
+        assert len(v3) < len(v2)
+
+    def test_v3_header_same_as_v2(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("test_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v3(frame, self.ct)
+        header = code.split()[0]
+        assert len(header) == 6
+        assert code.startswith("Uobl")
+
+    def test_v3_no_underscores_in_key(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("semantic_frames_approach"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v3(frame, self.ct)
+        obj_part = code.split()[1]
+        key = obj_part[1:]  # strip # prefix
+        assert "_" not in key
+
+    def test_v3_with_target(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.PREFER),
+            object=Entity("graph_memory"),
+            target=Entity("linear_text"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v3(frame, self.ct)
+        assert ">" in code
+
+    def test_v3_decode_round_trip(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("semantic_frames"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        code = self.encoder.encode_v3(frame, self.ct)
+        # v3 uses same decode as v2
+        fields = self.encoder.decode_fields_v2(code, self.ct)
+        assert fields["speaker"] == "U"
+        assert fields["mode"] == "o"
+        assert fields["act"] == "bl"
+        assert "object" in fields
+
+    def test_v3_reref(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.OPINION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity("some_long_concept"),
+            certainty=Certainty(0.70),
+            time=TimeReference.PRESENT,
+        )
+        c1 = self.encoder.encode_v3(frame, self.ct)
+        c2 = self.encoder.encode_v3(frame, self.ct)
+        assert "#" in c1
+        assert "$" in c2
+        assert len(c2) < len(c1)
+
+    def test_v3_deterministic(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.SUGGEST),
+            object=Entity("normalization_rules"),
+            certainty=Certainty(0.6),
+            time=TimeReference.FUTURE,
+        )
+        ct1 = ConceptTable()
+        ct2 = ConceptTable()
+        assert self.encoder.encode_v3(frame, ct1) == self.encoder.encode_v3(frame, ct2)
+
+    def test_v3_all_acts_valid_header(self):
+        for act in SemanticAct:
+            ct = ConceptTable()
+            frame = SemanticFrame(
+                predicate=Predicate(act),
+                object=Entity(f"obj_{act.value}"),
+            )
+            code = self.encoder.encode_v3(frame, ct)
+            assert len(code.split()[0]) == 6

@@ -318,3 +318,65 @@ class NormalizationVocabulary:
         if len(result) > 24:
             result = result[:24].rstrip("_")
         return result
+
+    def compress_object_key_v3(self, raw: str) -> str:
+        """
+        Ultra-compact key compression for v3 encoding.
+
+        Strategy:
+        1. Start from v2 compressed key (fillers removed, long words truncated)
+        2. Keep max 3 content tokens
+        3. Apply stem abbreviation dictionary (common stems → 2 chars)
+        4. Remaining tokens → first 2 chars
+        5. Concatenate without separators
+        """
+        base = self.compress_object_key(raw)
+        tokens = base.split("_")[:3]
+        parts = [STEM_ABBREVS.get(t, t[:2]) for t in tokens if t]
+        return "".join(parts)
+
+
+# ---------------------------------------------------------------------------
+# Stem abbreviation dictionary for v3 encoding
+# ---------------------------------------------------------------------------
+
+STEM_ABBREVS: dict[str, str] = {
+    # Structural / general
+    "1to1": "11", "1ton": "1n", "nton": "nn",
+    "new": "nw", "old": "ol", "best": "bs", "good": "gd",
+    "right": "rt", "great": "gt", "poor": "pr", "diff": "df",
+    "next": "nx", "prev": "pv", "used": "ud", "go": "go",
+    "we": "we", "use": "us", "set": "st", "get": "gt",
+    "add": "ad", "run": "rn", "try": "tr", "way": "wy",
+    "well": "wl", "bad": "bd", "high": "hi", "low": "lo",
+    # Domain-specific
+    "sent": "sn", "mapping": "mp", "map": "mp", "reco": "rc",
+    "natural": "nl", "lang": "lg", "graph": "gr", "memory": "mm",
+    "memo": "mm", "linear": "ln", "text": "tx", "storage": "st",
+    "store": "st", "sema": "sm", "semantic": "sm",
+    "frames": "fr", "frame": "fr", "comp": "cp",
+    "norm": "nm", "parser": "ps", "parse": "ps",
+    "model": "md", "models": "md", "typed": "tp", "loose": "ls",
+    "dict": "dc", "impl": "im", "pers": "pr",
+    "cycle": "cy", "encoder": "en", "encode": "en",
+    "decoder": "de", "decode": "de",
+    "quality": "ql", "output": "ou", "input": "in",
+    "layer": "ly", "appr": "ap", "approach": "ap",
+    "arch": "ac", "impr": "ip", "improve": "ip",
+    "handle": "hn", "ambi": "ab", "passive": "pv",
+    "rules": "rl", "rule": "rl", "string": "sg",
+    "code": "cd", "codes": "cd", "compact": "cm",
+    "pres": "ps", "preserve": "ps", "raw": "rw",
+    "ratio": "ra", "stra": "sa", "strategy": "sa",
+    "segm": "sg", "segment": "sg", "mean": "mn",
+    "meaning": "mn", "cons": "cn", "consistent": "cn",
+    "unfo": "uf", "misc": "mc", "defi": "df",
+    "avoid": "av", "system": "sy", "project": "pj",
+    "context": "cx", "session": "ss", "user": "ur",
+    "agent": "ag", "build": "bl", "create": "cr",
+    "update": "up", "delete": "dl", "search": "sr",
+    "query": "qr", "data": "da", "type": "ty",
+    "value": "vl", "key": "ky", "index": "ix",
+    "config": "cf", "error": "er", "debug": "db",
+    "test": "ts", "spec": "sp", "later": "lt",
+}

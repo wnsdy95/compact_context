@@ -278,7 +278,43 @@ class SymbolicEncoder:
             lines.append(f"Target: {fields['target']}")
         return "\n".join(lines)
 
-    # v2 enum decoders
+    # -------------------------------------------------------------------
+    # v3 encoding: v2 header + ultra-compact stem-abbreviated keys
+    # -------------------------------------------------------------------
+
+    def encode_v3(self, frame: SemanticFrame, concept_table: ConceptTable) -> str:
+        """
+        Encode a SemanticFrame into v3 ultra-compact form.
+
+        Same header as v2 (6 chars). Object keys use stem abbreviation
+        dictionary + max 3 tokens + no underscore separators.
+        Target: ~30% of raw text size.
+        """
+        vocab = NormalizationVocabulary()
+
+        s = SPEAKER_CODES.get(frame.speaker, "?")
+        m = MODE_CODES_V2.get(frame.mode, "?")
+        aa = ACT_CODES_V2.get(frame.act, "uk")
+        c = _certainty_to_hex(frame.certainty.value)
+        t = TIME_CODES_V2.get(frame.time, "?")
+        header = f"{s}{m}{aa}{c}{t}"
+
+        if frame.object:
+            compressed = vocab.compress_object_key_v3(frame.object.canonical)
+            obj_ref = concept_table.ref(compressed)
+        else:
+            obj_ref = "#?obj"
+
+        parts = [header, obj_ref]
+
+        if frame.target:
+            compressed_t = vocab.compress_object_key_v3(frame.target.canonical)
+            tgt_ref = concept_table.ref(compressed_t)
+            parts.append(f">{tgt_ref}")
+
+        return " ".join(parts)
+
+    # v2/v3 enum decoders (shared — same header format)
     def decode_mode_v2(self, code: str) -> SemanticMode:
         return MODE_DECODE_V2.get(code, SemanticMode.ASSERTION)
 

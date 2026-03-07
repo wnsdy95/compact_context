@@ -62,7 +62,7 @@ class Pipeline:
     decoder: Reconstructor = field(default_factory=Reconstructor)
     memory: MemoryStore = field(default_factory=MemoryStore)
     concept_table: ConceptTable = field(default_factory=ConceptTable)
-    encoding_version: int = 2
+    encoding_version: int = 3
     auto_store: bool = True  # automatically store frames in memory
 
     def process(
@@ -81,10 +81,7 @@ class Pipeline:
         4. Return ProcessResult
         """
         frame = self.parser.parse(text, speaker)
-        if self.encoding_version >= 2:
-            code = self.encoder.encode_v2(frame, self.concept_table)
-        else:
-            code = self.encoder.encode(frame)
+        code = self._encode_frame(frame)
 
         mem = None
         if self.auto_store:
@@ -117,10 +114,7 @@ class Pipeline:
         frames = self.parser.parse_multi(text, speaker)
         results = []
         for frame in frames:
-            if self.encoding_version >= 2:
-                code = self.encoder.encode_v2(frame, self.concept_table)
-            else:
-                code = self.encoder.encode(frame)
+            code = self._encode_frame(frame)
             mem = None
             if self.auto_store:
                 mem = self.memory.store(frame, tags=tags)
@@ -129,6 +123,15 @@ class Pipeline:
                 concept_table=self.concept_table if self.encoding_version >= 2 else None,
             ))
         return results
+
+    def _encode_frame(self, frame: SemanticFrame) -> str:
+        """Encode a frame using the configured encoding version."""
+        if self.encoding_version >= 3:
+            return self.encoder.encode_v3(frame, self.concept_table)
+        elif self.encoding_version == 2:
+            return self.encoder.encode_v2(frame, self.concept_table)
+        else:
+            return self.encoder.encode(frame)
 
     def decode(self, code: str, style: str = "declarative") -> str:
         """Decode a compact code back to natural language."""
