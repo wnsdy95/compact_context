@@ -8,18 +8,20 @@ The spec is designed for system prompt injection (≤300 tokens).
 FORMAT_SPEC = """\
 # AILang-IR Compressed Format
 
-Each line: `HEADER object_key [>target] [#act_label]`
+Each line: `HEADER object_key [>target] [#act_label] [| source snippet]`
 
 Header = 6 chars: Speaker(U/A/S/T/?) Mode(a/o/h/r/c/q/k/b/f) Act(2ch) Certainty(0-f hex) Time(n/p/f/a/?)
 Act codes: bl=believe sg=suggest pr=prefer ag=agree dg=disagree nd=need dc=decide rj=reject cr=create md=modify dl=delete qu=query ob=observe cm=compare pl=plan wn=warn ex=explain uk=unknown
 
 Lines ending with `#act_label` clarify the stance (e.g. #disagree, #prefer).
+`| snippet` preserves source details (numbers, conditions) that keys lose.
 
 Examples:
   Uoblbn postgresql_main          — User believes postgresql is main choice
   Uadgbn monolith #disagree       — User disagrees, prefers monolith
   Uaprbn rest >graphql #prefer    — User prefers rest over graphql
-  Aasgbn redis_caching             — Agent suggests redis caching\
+  Aasgbn redis_caching             — Agent suggests redis caching
+  Uoblbn data_pipeline | processing takes 6 hours currently\
 """
 
 

@@ -56,6 +56,62 @@ _LLM_KEY_FILLERS = {
     "using", "instead", "also", "well",
 }
 
+# Words to strip from source snippets (more aggressive than key fillers)
+_SNIPPET_STOPWORDS = {
+    "i", "we", "you", "he", "she", "they", "it", "me", "us",
+    "my", "your", "our", "his", "her", "their", "its",
+    "the", "a", "an", "this", "that", "these", "those",
+    "is", "are", "was", "were", "be", "been", "being",
+    "have", "has", "had", "do", "does", "did",
+    "will", "would", "could", "should", "can", "may", "might",
+    "and", "or", "but", "so", "if", "then", "also", "too",
+    "very", "really", "just", "actually", "basically", "definitely",
+    "think", "believe", "feel", "know",
+}
+
+import re
+
+# Matches numbers with optional units (e.g., "6h", "30min", "$500", "99%")
+_NUMBER_PATTERN = re.compile(r'\$?\d+[\d,.]*\s*(?:%|hours?|hrs?|h|minutes?|mins?|min|seconds?|secs?|s|days?|d|weeks?|months?|years?|gb|mb|kb|tb|ms|k|m)?', re.IGNORECASE)
+
+
+def _condense_source(text: str, max_words: int = 12) -> str:
+    """Condense source text into a short snippet preserving key details.
+
+    Keeps numbers, proper-noun-like words, and content words.
+    Strips filler/stopwords aggressively. Caps at max_words.
+    """
+    if not text:
+        return ""
+
+    # Extract and protect numbers+units first
+    numbers = _NUMBER_PATTERN.findall(text)
+    # Remove sentence-ending punctuation, keep internal punctuation
+    cleaned = text.strip().rstrip(".")
+
+    words = cleaned.split()
+    content: list[str] = []
+    for w in words:
+        low = w.lower().strip(".,;:!?\"'()")
+        # Always keep numbers and words with digits
+        if any(c.isdigit() for c in w):
+            content.append(w.strip(".,;:!?\"'()"))
+        # Keep quoted terms
+        elif w.startswith('"') or w.startswith("'"):
+            content.append(w.strip(".,;:!?\"'()"))
+        # Skip stopwords
+        elif low in _SNIPPET_STOPWORDS:
+            continue
+        # Keep content words
+        else:
+            content.append(w.strip(".,;:!?\"'()"))
+
+    if not content:
+        # Fallback: use first few words
+        content = [w.strip(".,;:!?") for w in words[:max_words]]
+
+    return " ".join(content[:max_words]).lower()
+
 
 def _llm_key(vocab: NormalizationVocabulary, canonical: str) -> str:
     """
@@ -90,14 +146,16 @@ class LLMCodec:
     Decode: LLM format string -> SemanticFrame
     """
 
-    def encode(self, frame: SemanticFrame, act_labels: bool = False) -> str:
+    def encode(self, frame: SemanticFrame, act_labels: bool = False,
+               source_snippet: bool = False) -> str:
         """
         Encode a SemanticFrame into LLM-readable format.
 
-        Format: HEADER object_key [>target_key] [#act_label]
+        Format: HEADER object_key [>target_key] [#act_label] [| snippet]
         Header: S(1) M(1) AA(2) C(1) T(1) = 6 chars
         Object key: natural words, no truncation
         act_labels: if True, append #act_label for stance-critical acts
+        source_snippet: if True, append condensed source text after |
         """
         vocab = NormalizationVocabulary()
 
@@ -125,6 +183,12 @@ class LLMCodec:
         # Act label for stance-critical acts
         if act_labels and frame.act in _STANCE_ACTS:
             parts.append(f"#{_STANCE_ACTS[frame.act]}")
+
+        # Source snippet for detail preservation
+        if source_snippet and frame.source_text:
+            snippet = _condense_source(frame.source_text)
+            if snippet:
+                parts.append(f"| {snippet}")
 
         return " ".join(parts)
 
@@ -163,9 +227,13 @@ class LLMCodec:
             certainty=Certainty(certainty_val),
         )
 
-    def encode_batch(self, frames: list[SemanticFrame], act_labels: bool = False) -> str:
+    def encode_batch(self, frames: list[SemanticFrame], act_labels: bool = False,
+                     source_snippet: bool = False) -> str:
         """Encode multiple frames into newline-separated LLM format."""
-        return "\n".join(self.encode(f, act_labels=act_labels) for f in frames)
+        return "\n".join(
+            self.encode(f, act_labels=act_labels, source_snippet=source_snippet)
+            for f in frames
+        )
 
     def decode_batch(self, text: str) -> list[SemanticFrame]:
         """Decode newline-separated LLM format codes into frames."""

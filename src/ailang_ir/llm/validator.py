@@ -128,7 +128,11 @@ def validate_code(code: str) -> ValidationResult:
                 _validate_key(target_key, "target", errors)
             target_start += 1
         # Act label tokens (#agree, #disagree, etc.) are allowed
-        remaining = [t for t in tokens[target_start:] if not t.startswith("#")]
+        # Pipe separator (|) starts a source snippet — everything after is free text
+        rest = tokens[target_start:]
+        if "|" in rest:
+            rest = rest[:rest.index("|")]
+        remaining = [t for t in rest if not t.startswith("#")]
         if remaining:
             errors.append(f"unexpected extra tokens: {' '.join(remaining)}")
 
