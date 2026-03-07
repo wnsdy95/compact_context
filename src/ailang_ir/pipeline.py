@@ -200,16 +200,17 @@ class Pipeline:
         """Ingest multiple LLM-produced codes."""
         return [self.ingest_code(c) for c in codes]
 
-    def export_context(self, n: int = 10) -> str:
+    def export_context(self, n: int = 10, act_labels: bool = True) -> str:
         """
         Export the most recent n memories as LLM-readable format.
 
-        Returns newline-separated LLM format codes.
+        act_labels: append #act_label for stance-critical acts
+                    (agree, disagree, prefer, reject, suggest, decide)
         """
         codec = LLMCodec()
         memories = self.memory.query_recent(n)
         frames = [m.frame for m in memories]
-        return codec.encode_batch(frames)
+        return codec.encode_batch(frames, act_labels=act_labels)
 
     def process_with_llm(
         self,

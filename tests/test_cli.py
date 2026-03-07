@@ -26,13 +26,12 @@ class TestSpec:
     def test_spec_prints_format(self):
         r = run_cli("spec")
         assert r.returncode == 0
-        assert "AILang-IR LLM Format" in r.stdout
-        assert "S M AA C T" in r.stdout  # New boundary visualization
+        assert "AILang-IR Compressed Format" in r.stdout
 
     def test_spec_contains_header_layout(self):
         r = run_cli("spec")
-        assert "pos:" in r.stdout
-        assert "field:" in r.stdout
+        assert "Header" in r.stdout
+        assert "Act" in r.stdout
 
 
 class TestCompress:
@@ -185,17 +184,17 @@ class TestNoCommand:
 class TestFormatSpecImprovement:
     """Test that the FORMAT_SPEC has boundary visualization."""
 
-    def test_format_spec_has_boundary_layout(self):
+    def test_format_spec_has_header_description(self):
         from ailang_ir.llm.format_spec import FORMAT_SPEC
-        assert "S M AA C T" in FORMAT_SPEC
-        assert "pos:" in FORMAT_SPEC
-        assert "field:" in FORMAT_SPEC
+        assert "Header" in FORMAT_SPEC
+        assert "Speaker" in FORMAT_SPEC
 
-    def test_format_spec_has_annotated_example(self):
+    def test_format_spec_has_act_labels(self):
         from ailang_ir.llm.format_spec import FORMAT_SPEC
-        # Should have the annotated example showing field mapping
-        assert "U o b l b n" in FORMAT_SPEC
+        assert "#act_label" in FORMAT_SPEC
+        assert "#disagree" in FORMAT_SPEC
 
-    def test_act_field_labeled_2ch(self):
+    def test_act_codes_listed(self):
         from ailang_ir.llm.format_spec import FORMAT_SPEC
-        assert "Act (2ch)" in FORMAT_SPEC
+        assert "Act(2ch)" in FORMAT_SPEC
+        assert "bl=believe" in FORMAT_SPEC

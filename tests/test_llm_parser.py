@@ -51,8 +51,8 @@ def make_parser_with_mock(response_text: str) -> LLMParser:
 class TestSystemPrompt:
     def test_contains_format_spec(self):
         prompt = _build_system_prompt()
-        assert "AILang-IR LLM Format" in prompt
-        assert "S M AA C T" in prompt
+        assert "AILang-IR Compressed Format" in prompt
+        assert "Act" in prompt
 
     def test_contains_rules(self):
         prompt = _build_system_prompt()

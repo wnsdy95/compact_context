@@ -115,7 +115,7 @@ def validate_code(code: str) -> ValidationResult:
             object_key = obj_token
             _validate_key(object_key, "object", errors)
 
-    # --- Target key validation (optional) ---
+    # --- Target key and act label validation (optional) ---
     target_start = 2
     if len(tokens) > target_start:
         tgt_token = tokens[target_start]
@@ -127,9 +127,10 @@ def validate_code(code: str) -> ValidationResult:
                 target_key = raw_target
                 _validate_key(target_key, "target", errors)
             target_start += 1
-        # Extra tokens after target
-        if len(tokens) > target_start:
-            errors.append(f"unexpected extra tokens: {' '.join(tokens[target_start:])}")
+        # Act label tokens (#agree, #disagree, etc.) are allowed
+        remaining = [t for t in tokens[target_start:] if not t.startswith("#")]
+        if remaining:
+            errors.append(f"unexpected extra tokens: {' '.join(remaining)}")
 
     return ValidationResult(
         is_valid=len(errors) == 0,

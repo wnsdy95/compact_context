@@ -6,9 +6,27 @@ The spec is designed for system prompt injection (≤300 tokens).
 """
 
 FORMAT_SPEC = """\
-# AILang-IR LLM Format
+# AILang-IR Compressed Format
 
-Encode semantic statements as: `HEADER object_key [>target_key]`
+Each line: `HEADER object_key [>target] [#act_label]`
+
+Header = 6 chars: Speaker(U/A/S/T/?) Mode(a/o/h/r/c/q/k/b/f) Act(2ch) Certainty(0-f hex) Time(n/p/f/a/?)
+Act codes: bl=believe sg=suggest pr=prefer ag=agree dg=disagree nd=need dc=decide rj=reject cr=create md=modify dl=delete qu=query ob=observe cm=compare pl=plan wn=warn ex=explain uk=unknown
+
+Lines ending with `#act_label` clarify the stance (e.g. #disagree, #prefer).
+
+Examples:
+  Uoblbn postgresql_main          — User believes postgresql is main choice
+  Uadgbn monolith #disagree       — User disagrees, prefers monolith
+  Uaprbn rest >graphql #prefer    — User prefers rest over graphql
+  Aasgbn redis_caching             — Agent suggests redis caching\
+"""
+
+
+FORMAT_SPEC_FULL = """\
+# AILang-IR LLM Format (Full Reference)
+
+Encode semantic statements as: `HEADER object_key [>target_key] [#act_label]`
 
 ## Header (6 chars, layout: S M AA C T)
 
@@ -34,12 +52,17 @@ ex:   U o b l b n  = User, opinion, believe, 73%, now
 
 `>target_key` for comparisons (e.g., prefer X over Y).
 
+## Act Label (optional)
+
+`#act_label` appended to lines with stance-critical acts for clarity.
+
 ## Examples
 
 ```
 Uoblbn graph_mem
 Uandbn sem_compress
-Uaprbn typed_models >dicts
+Uaprbn typed_models >dicts #prefer
+Uadgbn microservices #disagree
 Uqqu7n parser
 Ukplbf persistence
 ```\
@@ -47,5 +70,10 @@ Ukplbf persistence
 
 
 def get_format_spec() -> str:
-    """Return the LLM format specification string for system prompt injection."""
+    """Return the compact LLM format specification for system prompt injection."""
     return FORMAT_SPEC
+
+
+def get_format_spec_full() -> str:
+    """Return the full LLM format specification with complete reference tables."""
+    return FORMAT_SPEC_FULL

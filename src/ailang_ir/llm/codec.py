@@ -23,6 +23,16 @@ from ailang_ir.models.domain import (
     SpeakerRole,
     TimeReference,
 )
+
+# Acts where stance is critical for understanding — append #label in export
+_STANCE_ACTS = {
+    SemanticAct.AGREE: "agree",
+    SemanticAct.DISAGREE: "disagree",
+    SemanticAct.PREFER: "prefer",
+    SemanticAct.REJECT: "reject",
+    SemanticAct.SUGGEST: "suggest",
+    SemanticAct.DECIDE: "decide",
+}
 from ailang_ir.encoder.codebook import (
     SPEAKER_CODES,
     SPEAKER_DECODE,
@@ -80,13 +90,14 @@ class LLMCodec:
     Decode: LLM format string -> SemanticFrame
     """
 
-    def encode(self, frame: SemanticFrame) -> str:
+    def encode(self, frame: SemanticFrame, act_labels: bool = False) -> str:
         """
         Encode a SemanticFrame into LLM-readable format.
 
-        Format: HEADER object_key [>target_key]
+        Format: HEADER object_key [>target_key] [#act_label]
         Header: S(1) M(1) AA(2) C(1) T(1) = 6 chars
-        Object key: v2-level compression (natural words, no stem abbreviation)
+        Object key: natural words, no truncation
+        act_labels: if True, append #act_label for stance-critical acts
         """
         vocab = NormalizationVocabulary()
 
@@ -98,7 +109,7 @@ class LLMCodec:
         t = TIME_CODES_V2.get(frame.time, "?")
         header = f"{s}{m}{aa}{c}{t}"
 
-        # Object key: v2 compression + max 2 words for token efficiency
+        # Object key: natural words, no truncation
         if frame.object:
             obj_key = _llm_key(vocab, frame.object.canonical)
         else:
@@ -110,6 +121,10 @@ class LLMCodec:
         if frame.target:
             tgt_key = _llm_key(vocab, frame.target.canonical)
             parts.append(f">{tgt_key}")
+
+        # Act label for stance-critical acts
+        if act_labels and frame.act in _STANCE_ACTS:
+            parts.append(f"#{_STANCE_ACTS[frame.act]}")
 
         return " ".join(parts)
 
@@ -148,9 +163,9 @@ class LLMCodec:
             certainty=Certainty(certainty_val),
         )
 
-    def encode_batch(self, frames: list[SemanticFrame]) -> str:
+    def encode_batch(self, frames: list[SemanticFrame], act_labels: bool = False) -> str:
         """Encode multiple frames into newline-separated LLM format."""
-        return "\n".join(self.encode(f) for f in frames)
+        return "\n".join(self.encode(f, act_labels=act_labels) for f in frames)
 
     def decode_batch(self, text: str) -> list[SemanticFrame]:
         """Decode newline-separated LLM format codes into frames."""

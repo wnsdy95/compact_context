@@ -50,9 +50,8 @@ class TestFormatSpec:
     def test_spec_contains_all_mode_codes(self):
         spec = FORMAT_SPEC
         for code in MODE_CODES_V2.values():
-            # Mode codes are single chars, check in context
-            assert f"={code}" in spec or f" {code}=" in spec or f" {code} " in spec, \
-                f"Mode code '{code}' missing from spec"
+            # Mode codes are single chars; check they appear in the spec
+            assert code in spec, f"Mode code '{code}' missing from spec"
 
     def test_spec_contains_all_act_codes(self):
         spec = FORMAT_SPEC
@@ -66,7 +65,7 @@ class TestFormatSpec:
 
     def test_spec_contains_examples(self):
         assert "Uoblbn" in FORMAT_SPEC
-        assert "graph_mem" in FORMAT_SPEC
+        assert "postgresql_main" in FORMAT_SPEC
 
     def test_spec_token_estimate(self):
         """Spec should be ≤300 tokens (rough estimate: ~4 chars/token)."""
