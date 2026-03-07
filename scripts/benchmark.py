@@ -6,6 +6,7 @@ Compares v1 (pipe-delimited) vs v2 (assembly IR) vs v3 (stem-abbreviated) encodi
 from ailang_ir import Pipeline
 from ailang_ir.encoder import SymbolicEncoder, ConceptTable
 from ailang_ir.decoder import Reconstructor
+from ailang_ir.llm import LLMCodec
 
 encoder = SymbolicEncoder()
 
@@ -160,13 +161,68 @@ for text, code in zip(CONVERSATION, codes):
 # ============================================================
 # 4. ASSESSMENT
 # ============================================================
-section("4. SUMMARY")
+
+# ============================================================
+# 4. LLM FORMAT — token compression
+# ============================================================
+section("4. LLM FORMAT — token compression")
+
+llm_codec = LLMCodec()
+pipe_llm = Pipeline(encoding_version=3)
+
+total_raw_tokens = 0
+total_llm_tokens = 0
+total_llm_bytes = 0
+total_v3_bytes_llm = 0
+
+def estimate_tokens(text: str) -> int:
+    """Rough token estimate: split on whitespace + punctuation boundaries."""
+    import re
+    tokens = re.findall(r"[a-zA-Z]+|[0-9]+|[^\s\w]", text)
+    return max(1, len(tokens))
+
+print()
+print(f"  {'Sentence':<45s} {'Raw-T':>5s} {'LLM-T':>5s} {'LLM-B':>5s} {'v3-B':>4s}  {'T%':>4s}")
+print(f"  {'-'*45} {'-----':>5s} {'-----':>5s} {'-----':>5s} {'----':>4s}  {'----':>4s}")
+
+for text in SENTENCES:
+    r = pipe_llm.process(text)
+    llm_code = llm_codec.encode(r.frame)
+    raw_t = estimate_tokens(text)
+    llm_t = estimate_tokens(llm_code)
+    llm_b = len(llm_code.encode("utf-8"))
+    v3_b = len(r.compact_code.encode("utf-8"))
+    total_raw_tokens += raw_t
+    total_llm_tokens += llm_t
+    total_llm_bytes += llm_b
+    total_v3_bytes_llm += v3_b
+    short = text[:43] + ".." if len(text) > 45 else text
+    print(f"  {short:<45s} {raw_t:5d} {llm_t:5d} {llm_b:5d} {v3_b:4d}  {llm_t/raw_t:4.0%}")
+
+print()
+llm_tr = total_llm_tokens / total_raw_tokens
+print(f"  Raw tokens total:   {total_raw_tokens}")
+print(f"  LLM tokens total:   {total_llm_tokens}  ({llm_tr:.1%})")
+print(f"  LLM bytes total:    {total_llm_bytes}")
+print(f"  v3 bytes total:     {total_v3_bytes_llm}")
+print(f"  Token compression:  {llm_tr:.1%} of raw")
+
+
+# ============================================================
+# 5. SUMMARY
+# ============================================================
+section("5. SUMMARY")
 
 print(f"""
   Compression evolution:
     v1: {v1_r:.1%}  (pipe-delimited, full enum names)
     v2: {v2_r:.1%}  (fixed header, compressed keys)
     v3: {v3_r:.1%}  (stem abbreviation, no separators)
+
+  LLM format:
+    Token compression:  {llm_tr:.1%} of raw tokens
+    Purpose: LLM-readable interface layer (not internal storage)
+    Key difference: natural-word object keys (no stem abbreviation)
 
   v3 key changes over v2:
   - Stem abbreviation dictionary (~100 common domain terms -> 2-char codes)
