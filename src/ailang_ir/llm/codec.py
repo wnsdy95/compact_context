@@ -43,9 +43,18 @@ def _llm_key(vocab: NormalizationVocabulary, canonical: str) -> str:
     """
     Compress a canonical key for LLM format.
 
-    Strategy: v2-level compression (filler removal, long-word truncation)
-    then cap at 2 content words for token efficiency.
+    If the key is already compact (≤2 lowercase words), pass through
+    for round-trip stability. Otherwise apply v2-level compression
+    and cap at 2 content words.
     """
+    words = canonical.split("_")
+    already_compact = (
+        1 <= len(words) <= 2
+        and all(w.isalnum() for w in words if w)
+        and canonical == canonical.lower()
+    )
+    if already_compact:
+        return canonical
     key = vocab.compress_object_key(canonical)
     words = key.split("_")[:2]
     return "_".join(words)
