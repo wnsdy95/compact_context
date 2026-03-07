@@ -31,7 +31,8 @@ ACT_SURFACE_MAP: dict[SemanticAct, list[str]] = {
     ],
     SemanticAct.SUGGEST: [
         "suggest", "propose", "recommend", "advise",
-        "would say", "how about",
+        "would say", "how about", "should use", "let's use",
+        "try using", "try", "use",
     ],
     SemanticAct.NEED: [
         "need", "require", "must have", "should have",

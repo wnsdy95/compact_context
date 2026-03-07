@@ -151,9 +151,11 @@ class Reconstructor:
         if frame.mode == SemanticMode.QUESTION:
             return self._question_style(frame)
 
-        # Certainty qualifier
+        # Certainty qualifier — only add if mode prefix doesn't already convey uncertainty
         cert_q = _certainty_qualifier(frame.certainty.value)
-        if cert_q:
+        # Avoid stacking qualifiers: "Maybe, perhaps" → just use mode_prefix if it's already hedging
+        mode_is_hedging = frame.mode in (SemanticMode.HYPOTHESIS,)
+        if cert_q and not mode_is_hedging:
             mode_prefix = f"{cert_q.capitalize()}, {mode_prefix.lower()}" if mode_prefix else f"{cert_q.capitalize()}, "
 
         # Act verb phrase — use third-person for "the user/system" subjects
@@ -174,13 +176,20 @@ class Reconstructor:
         # Target phrase (for comparisons)
         target_phrase = ""
         if frame.target:
-            target_phrase = f" over {_key_to_phrase(frame.target.canonical)}"
+            target_text = _key_to_phrase(frame.target.canonical)
+            if frame.act in (SemanticAct.PREFER, SemanticAct.COMPARE):
+                target_phrase = f" over {target_text}"
+            else:
+                target_phrase = f" rather than {target_text}"
 
         # Build sentence
         if frame.mode in (SemanticMode.OPINION, SemanticMode.HYPOTHESIS,
                           SemanticMode.OBSERVATION, SemanticMode.REFLECTION):
-            # First person: "I think X is Y"
-            sentence = f"{mode_prefix}{obj_phrase}{target_phrase}"
+            # First person with comparison support
+            if frame.target:
+                sentence = f"{mode_prefix}{obj_phrase} is preferable{target_phrase}"
+            else:
+                sentence = f"{mode_prefix}{obj_phrase}"
         elif frame.mode == SemanticMode.COMMITMENT:
             sentence = f"{mode_prefix}{verb} {obj_phrase}{target_phrase}"
         elif frame.mode == SemanticMode.COMMAND:
@@ -239,7 +248,12 @@ class Reconstructor:
     def _question_style(self, frame: SemanticFrame) -> str:
         """Reconstruct a question."""
         obj = _key_to_phrase(frame.object.canonical) if frame.object else "this"
-        return f"What about {obj}?"
+        # Try to form a more natural question
+        if obj.startswith("best ") or obj.startswith("right "):
+            return f"What is the {obj}?"
+        if " " not in obj:
+            return f"What about {obj}?"
+        return f"What is the {obj}?"
 
     # -------------------------------------------------------------------
     # Helpers

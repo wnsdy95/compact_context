@@ -11,17 +11,25 @@ without changing the interface.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Callable
+from pathlib import Path
+from typing import Any, Callable
 
 from ailang_ir.models.domain import (
+    Certainty,
     EventMemory,
     Entity,
+    Predicate,
+    Priority,
     RelationEdge,
     SemanticAct,
     SemanticFrame,
+    SemanticMode,
+    Sentiment,
     SpeakerRole,
+    TimeReference,
 )
 
 
@@ -263,3 +271,143 @@ class MemoryStore:
                 entry["source_text"] = mem.frame.source_text
             result.append(entry)
         return result
+
+    # -------------------------------------------------------------------
+    # Persistence — JSON file save/load
+    # -------------------------------------------------------------------
+
+    def save(self, path: str | Path) -> None:
+        """Save the entire memory store to a JSON file."""
+        path = Path(path)
+        data = {
+            "version": 1,
+            "memories": {
+                mid: _serialize_memory(mem)
+                for mid, mem in self._memories.items()
+            },
+            "edges": [_serialize_edge(e) for e in self._edges],
+        }
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+
+    @classmethod
+    def load(cls, path: str | Path) -> "MemoryStore":
+        """Load a memory store from a JSON file."""
+        path = Path(path)
+        data = json.loads(path.read_text(encoding="utf-8"))
+        store = cls()
+        for mid, mem_data in data.get("memories", {}).items():
+            mem = _deserialize_memory(mem_data)
+            store._memories[mid] = mem
+            store._index_memory(mem)
+        for edge_data in data.get("edges", []):
+            store._edges.append(_deserialize_edge(edge_data))
+        return store
+
+
+# ---------------------------------------------------------------------------
+# Serialization helpers (module-level, private)
+# ---------------------------------------------------------------------------
+
+def _serialize_frame(f: SemanticFrame) -> dict[str, Any]:
+    return {
+        "frame_id": f.frame_id,
+        "speaker": f.speaker.value,
+        "mode": f.mode.value,
+        "act": f.predicate.act.value,
+        "predicate_modifier": f.predicate.modifier,
+        "object": _serialize_entity(f.object) if f.object else None,
+        "target": _serialize_entity(f.target) if f.target else None,
+        "time": f.time.value,
+        "certainty": f.certainty.value,
+        "sentiment": f.sentiment.value,
+        "priority": f.priority.value,
+        "source_text": f.source_text,
+        "metadata": f.metadata,
+        "created_at": f.created_at.isoformat(),
+    }
+
+
+def _deserialize_frame(d: dict[str, Any]) -> SemanticFrame:
+    return SemanticFrame(
+        frame_id=d["frame_id"],
+        speaker=SpeakerRole(d["speaker"]),
+        mode=SemanticMode(d["mode"]),
+        predicate=Predicate(
+            act=SemanticAct(d["act"]),
+            modifier=d.get("predicate_modifier"),
+        ),
+        object=_deserialize_entity(d["object"]) if d.get("object") else None,
+        target=_deserialize_entity(d["target"]) if d.get("target") else None,
+        time=TimeReference(d["time"]),
+        certainty=Certainty(d["certainty"]),
+        sentiment=Sentiment(d["sentiment"]),
+        priority=Priority(d["priority"]),
+        source_text=d.get("source_text"),
+        metadata=d.get("metadata", {}),
+        created_at=datetime.fromisoformat(d["created_at"]),
+    )
+
+
+def _serialize_entity(e: Entity) -> dict[str, Any]:
+    return {
+        "canonical": e.canonical,
+        "surface_forms": list(e.surface_forms),
+        "entity_type": e.entity_type,
+        "metadata": e.metadata,
+    }
+
+
+def _deserialize_entity(d: dict[str, Any]) -> Entity:
+    return Entity(
+        canonical=d["canonical"],
+        surface_forms=tuple(d.get("surface_forms", ())),
+        entity_type=d.get("entity_type", "concept"),
+        metadata=d.get("metadata", {}),
+    )
+
+
+def _serialize_memory(m: EventMemory) -> dict[str, Any]:
+    return {
+        "memory_id": m.memory_id,
+        "frame": _serialize_frame(m.frame),
+        "timestamp": m.timestamp.isoformat(),
+        "access_count": m.access_count,
+        "last_accessed": m.last_accessed.isoformat() if m.last_accessed else None,
+        "superseded_by": m.superseded_by,
+        "tags": m.tags,
+    }
+
+
+def _deserialize_memory(d: dict[str, Any]) -> EventMemory:
+    return EventMemory(
+        memory_id=d["memory_id"],
+        frame=_deserialize_frame(d["frame"]),
+        timestamp=datetime.fromisoformat(d["timestamp"]),
+        access_count=d.get("access_count", 0),
+        last_accessed=datetime.fromisoformat(d["last_accessed"]) if d.get("last_accessed") else None,
+        superseded_by=d.get("superseded_by"),
+        tags=d.get("tags", []),
+    )
+
+
+def _serialize_edge(e: RelationEdge) -> dict[str, Any]:
+    return {
+        "source": _serialize_entity(e.source),
+        "target": _serialize_entity(e.target),
+        "relation": e.relation,
+        "weight": e.weight,
+        "evidence_frame_id": e.evidence_frame_id,
+        "metadata": e.metadata,
+    }
+
+
+def _deserialize_edge(d: dict[str, Any]) -> RelationEdge:
+    return RelationEdge(
+        source=_deserialize_entity(d["source"]),
+        target=_deserialize_entity(d["target"]),
+        relation=d["relation"],
+        weight=d.get("weight", 1.0),
+        evidence_frame_id=d.get("evidence_frame_id"),
+        metadata=d.get("metadata", {}),
+    )

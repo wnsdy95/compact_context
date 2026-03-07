@@ -150,3 +150,62 @@ class TestFullPipelineRoundTrip:
         assert "semantic" in reconstructed.lower() or "SEMANTIC" in code
         assert retrieved.frame.act == SemanticAct.BELIEVE
         assert retrieved.access_count >= 1
+
+
+class TestPersistence:
+    """Test JSON file save/load round-trip."""
+
+    def test_save_and_load(self, tmp_path):
+        store = MemoryStore()
+        store.store(_make_frame(SemanticAct.BELIEVE, "concept_a"))
+        store.store(_make_frame(SemanticAct.PREFER, "concept_b"))
+        store.store_edge(RelationEdge(
+            source=Entity("concept_a"),
+            target=Entity("concept_b"),
+            relation="related_to",
+        ))
+
+        path = tmp_path / "test_memory.json"
+        store.save(path)
+        assert path.exists()
+
+        loaded = MemoryStore.load(path)
+        assert loaded.size == 2
+        assert loaded.active_count == 2
+        assert len(loaded.get_edges_for("concept_a")) == 1
+
+    def test_round_trip_preserves_fields(self, tmp_path):
+        store = MemoryStore()
+        frame = _make_frame(SemanticAct.BELIEVE, "test_concept")
+        frame.source_text = "Original text."
+        mem = store.store(frame, tags=["important"])
+
+        path = tmp_path / "test.json"
+        store.save(path)
+        loaded = MemoryStore.load(path)
+
+        loaded_mem = loaded.get(mem.memory_id)
+        assert loaded_mem is not None
+        assert loaded_mem.frame.act == SemanticAct.BELIEVE
+        assert loaded_mem.frame.object.canonical == "test_concept"
+        assert loaded_mem.frame.source_text == "Original text."
+        assert "important" in loaded_mem.tags
+
+    def test_superseded_memory_persists(self, tmp_path):
+        store = MemoryStore()
+        old = store.store(_make_frame(SemanticAct.BELIEVE, "old_idea"))
+        store.supersede(old.memory_id, _make_frame(SemanticAct.BELIEVE, "new_idea"))
+
+        path = tmp_path / "test.json"
+        store.save(path)
+        loaded = MemoryStore.load(path)
+
+        assert loaded.size == 2
+        assert loaded.active_count == 1
+
+    def test_empty_store_save_load(self, tmp_path):
+        store = MemoryStore()
+        path = tmp_path / "empty.json"
+        store.save(path)
+        loaded = MemoryStore.load(path)
+        assert loaded.size == 0
