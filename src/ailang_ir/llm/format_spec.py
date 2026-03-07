@@ -10,13 +10,19 @@ FORMAT_SPEC = """\
 
 Encode semantic statements as: `HEADER object_key [>target_key]`
 
-## Header (6 positional chars)
+## Header (6 chars, layout: S M AA C T)
+
+```
+pos:  0 1 2 3 4 5
+field: S M A A C T
+ex:   U o b l b n  = User, opinion, believe, 73%, now
+```
 
 | Pos | Field     | Values |
 |-----|-----------|--------|
 | 0   | Speaker   | U=user S=system A=agent T=third ?=unknown |
 | 1   | Mode      | a=assert o=opinion h=hypothesis r=request c=command q=question k=commit b=observe f=reflect |
-| 2:4 | Act       | bl=believe pr=prefer sg=suggest nd=need dc=decide rj=reject ag=agree dg=disagree cr=create md=modify dl=delete qu=query ob=observe cm=compare pl=plan wn=warn ex=explain uk=unknown |
+| 2-3 | Act (2ch) | bl=believe pr=prefer sg=suggest nd=need dc=decide rj=reject ag=agree dg=disagree cr=create md=modify dl=delete qu=query ob=observe cm=compare pl=plan wn=warn ex=explain uk=unknown |
 | 4   | Certainty | hex 0-f (0=0% f=100%) |
 | 5   | Time      | n=now p=past f=future a=atemporal ?=unknown |
 

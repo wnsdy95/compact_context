@@ -21,6 +21,7 @@ from ailang_ir.decoder.reconstructor import Reconstructor
 from ailang_ir.memory.store import MemoryStore
 from ailang_ir.llm.codec import LLMCodec
 from ailang_ir.llm.format_spec import get_format_spec
+from ailang_ir.llm.llm_parser import LLMParser
 from ailang_ir.llm.validator import validate_code
 
 
@@ -209,6 +210,32 @@ class Pipeline:
         memories = self.memory.query_recent(n)
         frames = [m.frame for m in memories]
         return codec.encode_batch(frames)
+
+    def process_with_llm(
+        self,
+        text: str,
+        speaker: SpeakerRole = SpeakerRole.USER,
+        tags: list[str] | None = None,
+        model: str = "claude-haiku-4-5-20251001",
+    ) -> ProcessResult:
+        """
+        Process text using LLM parser instead of rule-based parser.
+
+        Requires ANTHROPIC_API_KEY or anthropic SDK installed.
+        Falls back to rule-based parser on any failure.
+        """
+        llm_parser = LLMParser(model=model)
+        frame = llm_parser.parse(text, speaker)
+        code = self._encode_frame(frame)
+
+        mem = None
+        if self.auto_store:
+            mem = self.memory.store(frame, tags=tags)
+
+        return ProcessResult(
+            frame=frame, compact_code=code, memory=mem,
+            concept_table=self.concept_table if self.encoding_version >= 2 else None,
+        )
 
     def get_format_spec(self) -> str:
         """Return the LLM format specification for system prompt injection."""

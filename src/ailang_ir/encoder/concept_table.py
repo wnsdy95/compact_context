@@ -8,6 +8,7 @@ of previously seen concepts with minimal bytes (e.g. $0, $1a).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from typing import Any
 
 
@@ -93,5 +94,52 @@ class ConceptTable:
         existing = self.lookup(key)
         if existing is not None:
             return f"${encode_id(existing)}"
+        self.define(key)
+        return f"#{key}"
+
+    def ref_fuzzy(self, key: str, threshold: float = 0.7) -> str:
+        """Like ref(), but checks for similar existing keys before defining.
+
+        If a sufficiently similar key already exists, returns its $id reference
+        instead of defining a new entry. This enables re-reference for
+        semantically equivalent but lexically different concept keys.
+
+        Returns:
+            ``$base36_id`` if exact or fuzzy match found.
+            ``#key`` if new key is defined.
+        """
+        # Exact match first
+        existing = self.lookup(key)
+        if existing is not None:
+            return f"${encode_id(existing)}"
+
+        # Fuzzy match against existing keys
+        best_key: str | None = None
+        best_score = 0.0
+        key_words = set(key.split("_"))
+        for existing_key in self._key_to_id:
+            # Word overlap
+            ew = set(existing_key.split("_"))
+            if key_words and ew:
+                jaccard = len(key_words & ew) / len(key_words | ew)
+            else:
+                jaccard = 0.0
+            # Containment
+            if key in existing_key or existing_key in key:
+                contain = 0.9
+            else:
+                contain = 0.0
+            # Sequence match
+            seq = SequenceMatcher(None, key, existing_key).ratio()
+            score = max(jaccard, contain, seq)
+            if score > best_score:
+                best_score = score
+                best_key = existing_key
+
+        if best_key is not None and best_score >= threshold:
+            cid = self._key_to_id[best_key]
+            return f"${encode_id(cid)}"
+
+        # No match — define new
         self.define(key)
         return f"#{key}"

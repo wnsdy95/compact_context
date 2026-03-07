@@ -290,6 +290,7 @@ class NormalizationVocabulary:
                    "will", "would", "could", "should", "it", "that", "this",
                    "very", "really", "quite", "just"}
         tokens = re.split(r'[\s\-/]+', text)
+        tokens = [re.sub(r'[^a-z0-9_]', '', t) for t in tokens]
         tokens = [t for t in tokens if t and t not in fillers]
         return "_".join(tokens)
 

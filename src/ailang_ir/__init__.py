@@ -3,12 +3,13 @@
 __version__ = "0.1.0"
 
 from ailang_ir.pipeline import Pipeline, ProcessResult
-from ailang_ir.llm import LLMCodec, validate_code, get_format_spec
+from ailang_ir.llm import LLMCodec, LLMParser, validate_code, get_format_spec
 
 __all__ = [
     "Pipeline",
     "ProcessResult",
     "LLMCodec",
+    "LLMParser",
     "validate_code",
     "get_format_spec",
 ]

@@ -12,7 +12,9 @@ without changing the interface.
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Callable
@@ -204,6 +206,143 @@ class MemoryStore:
                 evidence_frame_id=new_mem.frame.frame_id,
             ))
 
+        return new_mem
+
+    # -------------------------------------------------------------------
+    # Fuzzy search and relevance
+    # -------------------------------------------------------------------
+
+    @staticmethod
+    def _entity_similarity(key1: str, key2: str) -> float:
+        """Compute similarity between two entity keys.
+
+        Uses multiple heuristics and returns the max score:
+        1. Exact match → 1.0
+        2. Containment → 0.9
+        3. Word-level Jaccard → 0.0-1.0
+        4. SequenceMatcher fallback → 0.0-1.0
+        """
+        if key1 == key2:
+            return 1.0
+        # Containment
+        if key1 in key2 or key2 in key1:
+            return 0.9
+        # Word overlap (Jaccard)
+        w1 = set(key1.split("_"))
+        w2 = set(key2.split("_"))
+        if w1 and w2:
+            jaccard = len(w1 & w2) / len(w1 | w2)
+        else:
+            jaccard = 0.0
+        # SequenceMatcher
+        seq = SequenceMatcher(None, key1, key2).ratio()
+        return max(jaccard, seq)
+
+    def query_by_entity_fuzzy(
+        self, key: str, threshold: float = 0.6,
+    ) -> list[tuple[EventMemory, float]]:
+        """Find active memories with entities similar to key.
+
+        Returns list of (memory, similarity) tuples sorted by similarity desc.
+        """
+        results: dict[str, float] = {}  # memory_id → best similarity
+        for entity_key, mids in self._entity_index.items():
+            sim = self._entity_similarity(key, entity_key)
+            if sim >= threshold:
+                for mid in mids:
+                    mem = self._memories.get(mid)
+                    if mem and mem.is_active:
+                        results[mid] = max(results.get(mid, 0.0), sim)
+
+        scored = [
+            (self._memories[mid], sim)
+            for mid, sim in results.items()
+        ]
+        scored.sort(key=lambda x: x[1], reverse=True)
+        return scored
+
+    def query_relevant(
+        self, context_keys: list[str], n: int = 10,
+    ) -> list[EventMemory]:
+        """Find most relevant memories for the given context keys.
+
+        Scoring:
+          entity_score = max similarity to any context key (0.6 weight)
+          recency_score = 1 / (1 + hours since creation) (0.2 weight)
+          access_score = log(1 + access_count) / 10 (0.2 weight)
+        """
+        now = datetime.now()
+        scored: dict[str, float] = {}
+
+        for mid, mem in self._memories.items():
+            if not mem.is_active:
+                continue
+
+            # Entity score: max similarity to any context key
+            entity_score = 0.0
+            mem_keys = []
+            if mem.frame.object:
+                mem_keys.append(mem.frame.object.canonical)
+            if mem.frame.target:
+                mem_keys.append(mem.frame.target.canonical)
+            for mk in mem_keys:
+                for ck in context_keys:
+                    entity_score = max(entity_score, self._entity_similarity(mk, ck))
+
+            # Recency score
+            hours = max((now - mem.timestamp).total_seconds() / 3600, 0)
+            recency_score = 1.0 / (1.0 + hours)
+
+            # Access score
+            access_score = math.log1p(mem.access_count) / 10.0
+
+            total = entity_score * 0.6 + recency_score * 0.2 + access_score * 0.2
+            scored[mid] = total
+
+        top = sorted(scored.items(), key=lambda x: x[1], reverse=True)[:n]
+        return [self._memories[mid] for mid, _ in top]
+
+    def consolidate(
+        self, entity_key: str, threshold: float = 0.6,
+    ) -> EventMemory | None:
+        """Merge multiple memories about the same entity into one summary.
+
+        Returns the consolidated memory, or None if fewer than 2 matches.
+        """
+        matches = self.query_by_entity_fuzzy(entity_key, threshold)
+        if len(matches) < 2:
+            return None
+
+        # Pick most recent as representative
+        memories = [m for m, _ in matches]
+        memories.sort(key=lambda m: m.timestamp, reverse=True)
+        representative = memories[0]
+
+        # Build consolidated frame from most recent
+        consolidated_frame = SemanticFrame(
+            speaker=representative.frame.speaker,
+            mode=representative.frame.mode,
+            predicate=representative.frame.predicate,
+            object=representative.frame.object,
+            target=representative.frame.target,
+            time=representative.frame.time,
+            certainty=representative.frame.certainty,
+            sentiment=representative.frame.sentiment,
+            source_text=f"[consolidated from {len(memories)} memories]",
+            metadata={"consolidated_from": [m.memory_id for m in memories]},
+        )
+
+        # Supersede all old memories
+        for mem in memories:
+            mem.superseded_by = "consolidated"
+
+        # Store new
+        new_mem = EventMemory(
+            frame=consolidated_frame,
+            tags=["consolidated"],
+        )
+        self._memories[new_mem.memory_id] = new_mem
+        self._index_memory(new_mem)
         return new_mem
 
     # -------------------------------------------------------------------
