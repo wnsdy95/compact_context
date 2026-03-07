@@ -143,19 +143,23 @@ class RuleBasedParser:
         Extract the main object/topic from a sentence.
 
         Strategy:
-        1. Strip speaker/mode prefixes
-        2. Strip act-related verbs
+        1. Strip speaker/mode prefixes (with adverb tolerance)
+        2. Strip act-related verbs (with comma-clause handling)
         3. Strip auxiliary/copula verbs and filler clauses
-        4. Extract the core noun phrase — prefer compact, meaningful keys
+        4. Strip residual pronouns and non-content verbs
+        5. Extract the core noun phrase — prefer compact, meaningful keys
         """
         cleaned = text.strip()
 
-        # Step 1: Remove speaker/mode prefixes
+        # Step 1: Remove speaker/mode prefixes (tolerant of adverbs like "also")
         prefix_patterns = [
             r'^(?:I think|I believe|I feel|I guess|In my opinion|Maybe|Perhaps|Probably)\s+(?:that\s+)?',
             r'^(?:It seems like|It appears that|It looks like)\s+',
-            r'^(?:We should|We need to|We need|We could|You should|The system should)\s+',
+            r'^(?:We|You|The system)\s+(?:also\s+)?(?:should|need to|need|could|will|can|must)\s+',
             r'^(?:Let\'s|Let us)\s+',
+            # Question-form prefixes
+            r'^(?:Have you|Did you|Do you|Can you|Could you)\s+(?:ever\s+)?(?:considered|thought about|tried|looked at|used)\s+',
+            r'^(?:What about|How about)\s+',
         ]
         for pat in prefix_patterns:
             cleaned = re.sub(pat, '', cleaned, flags=re.IGNORECASE)
@@ -164,8 +168,8 @@ class RuleBasedParser:
         act_verbs = {
             SemanticAct.BELIEVE: r'(?:I\s+)?(?:think|believe|feel|suppose)\s+(?:that\s+)?',
             SemanticAct.PREFER: r'(?:I\s+)?(?:prefer|favor|like better|would rather)\s+',
-            SemanticAct.SUGGEST: r'(?:I\s+)?(?:suggest|propose|recommend|use|try)\s+(?:that\s+)?',
-            SemanticAct.NEED: r'(?:I\s+|we\s+)?(?:need|require|must have|should have)\s+',
+            SemanticAct.SUGGEST: r'(?:I\s+)?(?:suggest|propose|recommend)\s+(?:that\s+)?(?:we\s+)?(?:use\s+|try\s+)?',
+            SemanticAct.NEED: r'(?:I\s+|we\s+)?(?:also\s+)?(?:need|require|must have|should have)\s+',
             SemanticAct.DECIDE: r'(?:I\s+)?(?:decide|chose|settled on)\s+(?:on\s+|to\s+)?',
             SemanticAct.REJECT: r'(?:I\s+)?(?:reject|refuse|decline)\s+',
             SemanticAct.AGREE: r'(?:I\s+)?(?:agree|concur)\s+(?:with\s+|that\s+)?',
@@ -175,12 +179,23 @@ class RuleBasedParser:
             SemanticAct.DELETE: r'(?:I\s+|we\s+)?(?:delete|remove|drop|discard)\s+',
             SemanticAct.OBSERVE: r'(?:I\s+)?(?:notice|see|observe|found)\s+(?:that\s+)?',
             SemanticAct.EXPLAIN: r'(?:explain|because|the reason is)\s+(?:that\s+)?',
-            SemanticAct.QUERY: r'(?:what is|what are|how does|how do|why|where|when)\s+',
+            SemanticAct.QUERY: r'(?:what is|what are|how does|how do|how is|how are|why|where|when)\s+',
             SemanticAct.WARN: r'(?:warn|be careful|watch out)\s+(?:about\s+)?',
             SemanticAct.COMPARE: r'(?:I\s+)?(?:compare|comparing)\s+',
+            SemanticAct.PLAN: r'(?:I\s+|we\s+)?(?:plan to|going to|intend to|aim to)\s+',
         }
         if act in act_verbs:
             cleaned = re.sub(f'^{act_verbs[act]}', '', cleaned, flags=re.IGNORECASE)
+
+        # Step 2b: Handle comma-separated stance clauses
+        # "I disagree, a monolith is better" → "a monolith is better"
+        # Only strip if what's after the comma has enough content
+        comma_stance = re.match(
+            r'^(?:I\s+)?(?:agree|disagree|concur|think so|don\'t think so)[,;]\s*(.+)',
+            cleaned, re.IGNORECASE,
+        )
+        if comma_stance and len(comma_stance.group(1).split()) >= 3:
+            cleaned = comma_stance.group(1)
 
         # Step 3: Reduce clausal complexity — extract core topic
         # Strip punctuation early so trailing-word patterns work
@@ -195,6 +210,14 @@ class RuleBasedParser:
         cleaned = re.sub(r'^(?:I notice|I see|I observe|I found)\s+(?:that\s+)?', '', cleaned, flags=re.IGNORECASE)
         # Remove trailing filler
         cleaned = re.sub(r'\s+(?:instead|as well|too|also|anyway)$', '', cleaned, flags=re.IGNORECASE)
+
+        # Step 3b: Strip residual leading verbs and pronouns
+        # "use PostgreSQL" → "PostgreSQL", "deploy on AWS" → "AWS"
+        cleaned = re.sub(
+            r'^(?:use|using|deploy|deploying|design|designing|consider|considered|'
+            r'handle|handling|require|requires|suggest|suggesting)\s+',
+            '', cleaned, flags=re.IGNORECASE,
+        )
 
         # Step 4: Extract noun-phrase core
         cleaned = cleaned.strip()
@@ -231,20 +254,26 @@ class RuleBasedParser:
                 # Use predicate as the object
                 text = predicate
             else:
-                # Combine subject + key predicate content
-                # Keep preposition + object patterns intact (e.g. "segmented into meaning units")
+                # Check if predicate is just adjectives/adverbs (no nouns)
+                # e.g. "Redis is fast and well supported" → subject "Redis" is the concept
+                pred_words = [w for w in predicate.split()
+                              if w.lower() not in {'a', 'an', 'the', 'and', 'or', 'but',
+                                                   'very', 'really', 'well', 'quite'}
+                              and len(w) > 2]
+                # If predicate has a preposition + noun, keep that structure
                 prep_match = re.search(
                     r'(\w+)\s+(into|from|for|with|about|over|under|between)\s+(.+)',
                     predicate, re.IGNORECASE,
                 )
                 if prep_match:
                     text = f"{subject} {prep_match.group(1)} {prep_match.group(2)} {prep_match.group(3)}"
+                elif pred_words and any(w[0].isupper() for w in pred_words):
+                    # Predicate has proper nouns — include them
+                    text = f"{subject} {' '.join(pred_words[:2])}"
+                elif pred_words:
+                    text = f"{subject} {' '.join(pred_words[:2])}"
                 else:
-                    pred_words = [w for w in predicate.split() if len(w) > 2][:2]
-                    if pred_words:
-                        text = f"{subject} {' '.join(pred_words)}"
-                    else:
-                        text = subject
+                    text = subject
 
         # Compact: limit to ~6 content words
         words = text.split()

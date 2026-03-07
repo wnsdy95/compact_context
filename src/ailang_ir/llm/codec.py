@@ -39,13 +39,22 @@ from ailang_ir.normalize.vocabulary import NormalizationVocabulary
 from ailang_ir.llm.validator import validate_code
 
 
+_LLM_KEY_FILLERS = {
+    "for", "of", "with", "about", "to", "in", "on", "at",
+    "from", "by", "than", "over", "into", "like", "between",
+    "through", "after", "before", "under", "against",
+    "using", "instead", "also", "well",
+}
+
+
 def _llm_key(vocab: NormalizationVocabulary, canonical: str) -> str:
     """
     Compress a canonical key for LLM format.
 
     If the key is already compact (≤2 lowercase words), pass through
-    for round-trip stability. Otherwise apply v2-level compression
-    and cap at 2 content words.
+    for round-trip stability. Otherwise remove fillers and cap at 2
+    content words — but keep words INTACT (no truncation) so LLMs
+    can understand the key.
     """
     words = canonical.split("_")
     already_compact = (
@@ -55,9 +64,11 @@ def _llm_key(vocab: NormalizationVocabulary, canonical: str) -> str:
     )
     if already_compact:
         return canonical
-    key = vocab.compress_object_key(canonical)
-    words = key.split("_")[:2]
-    return "_".join(words)
+    # Remove filler words but keep content words intact (no truncation)
+    content = [w for w in words if w and w not in _LLM_KEY_FILLERS]
+    if not content:
+        content = words[:2]
+    return "_".join(content[:2])
 
 
 @dataclass

@@ -285,10 +285,20 @@ class NormalizationVocabulary:
         text = re.sub(r'\bone[- ]to[- ]one\b', '1to1', text)
         text = re.sub(r'\bone[- ]to[- ]many\b', '1toN', text)
         text = re.sub(r'\bmany[- ]to[- ]many\b', 'NtoN', text)
-        # Remove filler words
+        # Remove filler words (pronouns, articles, auxiliaries, common non-content words)
         fillers = {"the", "a", "an", "is", "are", "was", "were", "be", "been",
                    "will", "would", "could", "should", "it", "that", "this",
-                   "very", "really", "quite", "just"}
+                   "very", "really", "quite", "just",
+                   # Pronouns — never meaningful as object key content
+                   "i", "we", "you", "he", "she", "they", "me", "us",
+                   "my", "your", "our", "his", "her", "their", "its",
+                   # Common non-content verbs and adverbs
+                   "have", "has", "had", "do", "does", "did",
+                   "also", "too", "then", "still", "even",
+                   # Prepositions and conjunctions
+                   "for", "of", "on", "in", "at", "by", "to", "as", "so", "if",
+                   "and", "or", "but", "not", "no", "yes",
+                   }
         tokens = re.split(r'[\s\-/]+', text)
         tokens = [re.sub(r'[^a-z0-9_]', '', t) for t in tokens]
         tokens = [t for t in tokens if t and t not in fillers]
