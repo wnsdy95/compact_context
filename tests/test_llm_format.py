@@ -468,3 +468,269 @@ class TestPipelineIntegration:
         spec = self.pipe.get_format_spec()
         assert "AILang-IR" in spec
         assert len(spec) > 100
+
+
+# ============================================================
+# SOURCE SNIPPET CONDENSATION
+# ============================================================
+
+class TestCondenseSource:
+    """Test _condense_source for detail-preserving snippets."""
+
+    def setup_method(self):
+        from ailang_ir.llm.codec import _condense_source
+        self.condense = _condense_source
+
+    def test_empty_string(self):
+        assert self.condense("") == ""
+
+    def test_none(self):
+        assert self.condense(None) == ""
+
+    def test_preserves_numbers(self):
+        result = self.condense("Processing takes about 6 hours currently.")
+        assert "6" in result
+
+    def test_preserves_number_with_unit(self):
+        result = self.condense("The target is under 30 minutes.")
+        assert "30" in result
+
+    def test_preserves_dollar_amount(self):
+        result = self.condense("The cost is $500 per month.")
+        assert "$500" in result or "500" in result
+
+    def test_strips_stopwords(self):
+        result = self.condense("I think that we should definitely use this.")
+        # "i", "think", "that", "we", "should", "definitely" are stopwords
+        assert "i" not in result.split()
+        assert "think" not in result.split()
+        assert "definitely" not in result.split()
+
+    def test_keeps_content_words(self):
+        result = self.condense("PostgreSQL is better for our database needs.")
+        assert "postgresql" in result
+
+    def test_max_words_cap(self):
+        long_text = " ".join(f"word{i}" for i in range(30))
+        result = self.condense(long_text, max_words=5)
+        assert len(result.split()) <= 5
+
+    def test_strips_trailing_period(self):
+        result = self.condense("Something important.")
+        assert not result.endswith(".")
+
+    def test_lowercases_output(self):
+        result = self.condense("PostgreSQL and MongoDB are GREAT.")
+        assert result == result.lower()
+
+    def test_complex_sentence(self):
+        result = self.condense("We tried Kafka but found it too complex for our needs.")
+        assert "kafka" in result
+        assert "complex" in result
+
+    def test_percentage(self):
+        result = self.condense("CPU usage is at 99% capacity.")
+        assert "99%" in result or "99" in result
+
+
+# ============================================================
+# ACT LABELS
+# ============================================================
+
+class TestActLabels:
+    """Test act label encoding for stance-critical acts."""
+
+    def setup_method(self):
+        self.codec = LLMCodec()
+
+    def _make_frame(self, act):
+        return SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(act),
+            object=Entity(canonical="test"),
+            certainty=Certainty(0.73),
+            time=TimeReference.PRESENT,
+        )
+
+    def test_disagree_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.DISAGREE), act_labels=True)
+        assert "#disagree" in code
+
+    def test_agree_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.AGREE), act_labels=True)
+        assert "#agree" in code
+
+    def test_prefer_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.PREFER), act_labels=True)
+        assert "#prefer" in code
+
+    def test_suggest_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.SUGGEST), act_labels=True)
+        assert "#suggest" in code
+
+    def test_reject_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.REJECT), act_labels=True)
+        assert "#reject" in code
+
+    def test_decide_label(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.DECIDE), act_labels=True)
+        assert "#decide" in code
+
+    def test_no_label_for_believe(self):
+        """Non-stance acts should not get labels."""
+        code = self.codec.encode(self._make_frame(SemanticAct.BELIEVE), act_labels=True)
+        assert "#" not in code
+
+    def test_no_label_when_disabled(self):
+        code = self.codec.encode(self._make_frame(SemanticAct.DISAGREE), act_labels=False)
+        assert "#" not in code
+
+    def test_label_in_batch(self):
+        frames = [
+            self._make_frame(SemanticAct.AGREE),
+            self._make_frame(SemanticAct.BELIEVE),
+        ]
+        batch = self.codec.encode_batch(frames, act_labels=True)
+        lines = batch.strip().splitlines()
+        assert "#agree" in lines[0]
+        assert "#" not in lines[1]
+
+
+# ============================================================
+# SOURCE SNIPPET ENCODING
+# ============================================================
+
+class TestSourceSnippetEncoding:
+    """Test source_snippet parameter in LLMCodec.encode()."""
+
+    def setup_method(self):
+        self.codec = LLMCodec()
+
+    def _make_frame(self, source_text=None):
+        return SemanticFrame(
+            speaker=SpeakerRole.USER,
+            mode=SemanticMode.ASSERTION,
+            predicate=Predicate(SemanticAct.BELIEVE),
+            object=Entity(canonical="data_pipeline"),
+            certainty=Certainty(0.73),
+            time=TimeReference.PRESENT,
+            source_text=source_text,
+        )
+
+    def test_snippet_appended_with_pipe(self):
+        frame = self._make_frame("Our data pipeline takes 6 hours.")
+        code = self.codec.encode(frame, source_snippet=True)
+        assert "|" in code
+        assert "6" in code
+
+    def test_no_snippet_when_disabled(self):
+        frame = self._make_frame("Our data pipeline takes 6 hours.")
+        code = self.codec.encode(frame, source_snippet=False)
+        assert "|" not in code
+
+    def test_no_snippet_when_no_source_text(self):
+        frame = self._make_frame(None)
+        code = self.codec.encode(frame, source_snippet=True)
+        assert "|" not in code
+
+    def test_snippet_with_act_label(self):
+        frame = SemanticFrame(
+            speaker=SpeakerRole.USER,
+            predicate=Predicate(SemanticAct.DISAGREE),
+            object=Entity(canonical="monolith"),
+            certainty=Certainty(0.73),
+            time=TimeReference.PRESENT,
+            source_text="I disagree, monolith is better for small teams.",
+        )
+        code = self.codec.encode(frame, act_labels=True, source_snippet=True)
+        assert "#disagree" in code
+        assert "|" in code
+        # Act label should come before pipe
+        label_pos = code.index("#disagree")
+        pipe_pos = code.index("|")
+        assert label_pos < pipe_pos
+
+    def test_batch_with_snippets(self):
+        frames = [
+            self._make_frame("Pipeline takes 6 hours."),
+            self._make_frame("Target is 30 minutes."),
+        ]
+        batch = self.codec.encode_batch(frames, source_snippet=True)
+        lines = batch.strip().splitlines()
+        assert len(lines) == 2
+        assert "|" in lines[0]
+        assert "|" in lines[1]
+        assert "6" in lines[0]
+        assert "30" in lines[1]
+
+    def test_batch_without_snippets(self):
+        frames = [self._make_frame("Something.")]
+        batch = self.codec.encode_batch(frames, source_snippet=False)
+        assert "|" not in batch
+
+
+# ============================================================
+# VALIDATOR PIPE TOLERANCE
+# ============================================================
+
+class TestValidatorPipeTolerance:
+    """Test that validator accepts codes with | source snippets."""
+
+    def test_valid_with_pipe_snippet(self):
+        r = validate_code("Uoblbn data_pipeline | takes 6 hours")
+        assert r.is_valid
+        assert r.object_key == "data_pipeline"
+
+    def test_valid_with_label_and_pipe(self):
+        r = validate_code("Uadgbn monolith #disagree | disagree monolith better")
+        assert r.is_valid
+        assert r.object_key == "monolith"
+
+    def test_valid_with_target_label_and_pipe(self):
+        r = validate_code("Uaprbn rest >graphql #prefer | prefer rest over graphql")
+        assert r.is_valid
+        assert r.object_key == "rest"
+        assert r.target_key == "graphql"
+
+    def test_pipe_only_no_content(self):
+        r = validate_code("Uoblbn test |")
+        assert r.is_valid
+
+    def test_pipe_with_numbers(self):
+        r = validate_code("Uoblbn pipeline | processing 6 hours $500")
+        assert r.is_valid
+
+
+# ============================================================
+# PIPELINE HYBRID EXPORT
+# ============================================================
+
+class TestPipelineHybridExport:
+    """Test Pipeline.export_context with source_snippets."""
+
+    def test_export_with_snippets(self):
+        pipe = Pipeline()
+        pipe.process("Our data pipeline takes 6 hours.")
+        export = pipe.export_context(n=1, source_snippets=True)
+        assert "|" in export
+        assert "6" in export
+
+    def test_export_without_snippets(self):
+        pipe = Pipeline()
+        pipe.process("Our data pipeline takes 6 hours.")
+        export = pipe.export_context(n=1, source_snippets=False)
+        assert "|" not in export
+
+    def test_export_default_no_snippets(self):
+        pipe = Pipeline()
+        pipe.process("Something important.")
+        export = pipe.export_context(n=1)
+        assert "|" not in export
+
+    def test_export_with_labels_and_snippets(self):
+        pipe = Pipeline()
+        pipe.process("I disagree with that approach.")
+        export = pipe.export_context(n=1, act_labels=True, source_snippets=True)
+        assert "#disagree" in export
+        assert "|" in export
