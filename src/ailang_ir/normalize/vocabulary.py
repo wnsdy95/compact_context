@@ -63,6 +63,8 @@ ACT_SURFACE_MAP: dict[SemanticAct, list[str]] = {
         "modify", "change", "update", "edit", "revise",
         "adjust", "alter", "refactor", "updated", "changed",
         "fixed", "fix", "improved", "improve",
+        "cleaned", "clean", "deployed", "deploy",
+        "migrated", "migrate", "configured", "configure",
     ],
     SemanticAct.DELETE: [
         "delete", "remove", "drop", "discard", "eliminate",
@@ -303,14 +305,23 @@ class NormalizationVocabulary:
                    "will", "would", "could", "should", "it", "that", "this",
                    "very", "really", "quite", "just",
                    # Pronouns — never meaningful as object key content
-                   "i", "we", "you", "he", "she", "they", "me", "us",
+                   "i", "we", "you", "he", "she", "they", "me", "us", "them",
                    "my", "your", "our", "his", "her", "their", "its",
                    # Common non-content verbs and adverbs
                    "have", "has", "had", "do", "does", "did",
                    "also", "too", "then", "still", "even",
+                   # Demonstratives and existentials
+                   "there", "here", "these", "those",
+                   # Quantifiers
+                   "all", "each", "every", "some", "any", "many", "much",
+                   "few", "several", "both", "other",
                    # Prepositions and conjunctions
                    "for", "of", "on", "in", "at", "by", "to", "as", "so", "if",
                    "and", "or", "but", "not", "no", "yes",
+                   # Transition words (common in agent responses)
+                   "however", "therefore", "additionally", "furthermore",
+                   "moreover", "meanwhile", "nevertheless", "otherwise",
+                   "currently", "now", "already", "about",
                    }
         tokens = re.split(r'[\s\-/]+', text)
         tokens = [re.sub(r'[^a-z0-9_]', '', t) for t in tokens]

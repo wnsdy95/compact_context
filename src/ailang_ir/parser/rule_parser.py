@@ -151,14 +151,30 @@ class RuleBasedParser:
         """
         cleaned = text.strip()
 
+        # Step 0: Strip leading transition words/conjunctions (common in agent multi-sentence responses)
+        cleaned = re.sub(
+            r'^(?:However|Therefore|Additionally|Furthermore|Moreover|Meanwhile|'
+            r'Nevertheless|Otherwise|Also|Still|Then|So|And|But|Or|Yet|'
+            r'In addition|As a result|On the other hand|That said|That being said)[,;]?\s+',
+            '', cleaned, flags=re.IGNORECASE,
+        )
+
+        # Step 0b: Handle colon-separated labels ("Key concerns: X" → "X")
+        colon_match = re.match(r'^(\w+(?:\s+\w+)?)\s*:\s+(.+)', cleaned)
+        if colon_match and len(colon_match.group(2).split()) >= 3:
+            cleaned = colon_match.group(2)
+
         # Step 1: Remove speaker/mode prefixes (tolerant of adverbs like "also")
         prefix_patterns = [
             r'^(?:I think|I believe|I feel|I guess|In my opinion|Maybe|Perhaps|Probably)\s+(?:that\s+)?',
             r'^(?:It seems like|It appears that|It looks like)\s+',
+            r'^(?:It\s+(?:says|does|did|can|could|will|would|should|has|is|was))\s+(?:not\s+)?',
+            r'^(?:I have|I\'ve|We have|We\'ve)\s+',
             r'^(?:We|You|The system)\s+(?:also\s+)?(?:should|need to|need|could|will|can|must)\s+',
             r'^(?:Let\'s|Let us)\s+',
-            # Question-form prefixes
-            r'^(?:Have you|Did you|Do you|Can you|Could you)\s+(?:ever\s+)?(?:considered|thought about|tried|looked at|used)\s+',
+            # Question-form prefixes — general pattern
+            r'^(?:Have you|Did you|Do you|Can you|Could you|Would you)\s+(?:ever\s+)?(?:considered?|thought about|tried|looked at|used|seen|checked|tested)\s+',
+            r'^(?:Can you|Could you|Would you)\s+(?:please\s+)?',
             r'^(?:What about|How about)\s+',
         ]
         for pat in prefix_patterns:
@@ -175,9 +191,9 @@ class RuleBasedParser:
             SemanticAct.AGREE: r'(?:I\s+)?(?:agree|concur)\s+(?:with\s+|that\s+)?',
             SemanticAct.DISAGREE: r'(?:I\s+)?(?:disagree)\s+(?:with\s+|that\s+)?',
             SemanticAct.CREATE: r'(?:I\s+|we\s+)?(?:create[ds]?|build|built|make|implement(?:ed)?|develop(?:ed)?|writ(?:e|ten)|generate[ds]?|add(?:ed)?)\s+',
-            SemanticAct.MODIFY: r'(?:I\s+|we\s+)?(?:modif(?:y|ied)|change[ds]?|update[ds]?|edit(?:ed)?|revis(?:e[ds]?|ing)|adjust(?:ed)?|fix(?:ed)?|improv(?:e[ds]?|ing))\s+',
+            SemanticAct.MODIFY: r'(?:I\s+|we\s+)?(?:modif(?:y|ied)|change[ds]?|update[ds]?|edit(?:ed)?|revis(?:e[ds]?|ing)|adjust(?:ed)?|fix(?:ed)?|improv(?:e[ds]?|ing)|clean(?:ed)?\s+up)\s+',
             SemanticAct.DELETE: r'(?:I\s+|we\s+)?(?:delete[ds]?|remov(?:e[ds]?|ing)|drop(?:ped)?|discard(?:ed)?)\s+',
-            SemanticAct.OBSERVE: r'(?:I\s+)?(?:notice[ds]?|see|observe[ds]?|found|show[ns]?|reveal[ns]?|indicat(?:e[ds]?|ing)|confirm[ns]?)\s+(?:that\s+)?',
+            SemanticAct.OBSERVE: r'(?:I\s+)?(?:notice[ds]?|see|observe[ds]?|found|show[ns]?|reveal[ns]?|indicat(?:e[ds]?|ing)|confirm[ns]?|profiled|deployed)\s+(?:that\s+)?',
             SemanticAct.EXPLAIN: r'(?:explain|because|the reason is)\s+(?:that\s+)?',
             SemanticAct.QUERY: r'(?:what is|what are|how does|how do|how is|how are|why|where|when)\s+',
             SemanticAct.WARN: r'(?:warn|be careful|watch out)\s+(?:about\s+)?',
@@ -205,6 +221,8 @@ class RuleBasedParser:
         cleaned = re.sub(r'\bbe\s+able\s+to\s+', '', cleaned, flags=re.IGNORECASE)
         # Remove auxiliary chains
         cleaned = re.sub(r'^(?:should|will|can|could|would|must|may|might)\s+(?:be\s+)?', '', cleaned, flags=re.IGNORECASE)
+        # Remove negation patterns (including bare "not" from partial strips)
+        cleaned = re.sub(r'^(?:does not|do not|did not|cannot|can\'t|don\'t|doesn\'t|won\'t|wouldn\'t|not)\s+', '', cleaned, flags=re.IGNORECASE)
         # Remove passive "be Xed" → keep as active concept
         cleaned = re.sub(r'^be\s+(\w+ed)\b', r'\1', cleaned, flags=re.IGNORECASE)
         # Remove observation prefix if still present
@@ -215,13 +233,17 @@ class RuleBasedParser:
         # Step 3b: Strip residual leading verbs and pronouns
         # "use PostgreSQL" → "PostgreSQL", "deploy on AWS" → "AWS"
         cleaned = re.sub(
-            r'^(?:use|using|deploy|deploying|design|designing|consider|considered|'
+            r'^(?:use|using|deploy|deploying|deployed|design|designing|consider|considered|'
             r'handle|handling|require|requires|suggest|suggesting|'
-            r'added|implemented|built|created|wrote|generated|'
-            r'updated|changed|fixed|improved|modified|revised|'
-            r'removed|deleted|dropped|'
-            r'shows?|reveals?|indicates?|confirms?|'
-            r'completed|passed|finished|done)\s+',
+            r'add|added|implement|implemented|built|created|wrote|generated|'
+            r'update|updated|change|changed|fix|fixed|improve|improved|modified|revised|'
+            r'remove|removed|deleted|dropped|'
+            r'clean|cleaned|cleaning|profile|profiled|profiling|configure|configured|configuring|'
+            r'found|finding|check|checked|checking|test|tested|testing|verify|verified|verifying|'
+            r'install|installed|installing|migrate|migrated|migrating|'
+            r'says?|shows?|reveals?|indicates?|confirms?|'
+            r'supports?|supporting|'
+            r'completed|passed|finished|done|ready)\s+',
             '', cleaned, flags=re.IGNORECASE,
         )
 
@@ -249,7 +271,7 @@ class RuleBasedParser:
 
         # Split at copula/auxiliary to separate subject from predicate
         verb_split = re.search(
-            r'^(.+?)\s+(?:will|should|can|could|would|must|is|are|was|were|has|have|had)\s+(?:be\s+)?(.+)',
+            r'^(.+?)\s+(?:will|should|can|could|would|must|does|do|did|is|are|was|were|has|have|had)\s+(?:be\s+)?(.+)',
             text, re.IGNORECASE,
         )
         if verb_split:
