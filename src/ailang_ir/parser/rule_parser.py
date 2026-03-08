@@ -174,10 +174,10 @@ class RuleBasedParser:
             SemanticAct.REJECT: r'(?:I\s+)?(?:reject|refuse|decline)\s+',
             SemanticAct.AGREE: r'(?:I\s+)?(?:agree|concur)\s+(?:with\s+|that\s+)?',
             SemanticAct.DISAGREE: r'(?:I\s+)?(?:disagree)\s+(?:with\s+|that\s+)?',
-            SemanticAct.CREATE: r'(?:I\s+|we\s+)?(?:create|build|make|implement|develop|write|generate)\s+',
-            SemanticAct.MODIFY: r'(?:I\s+|we\s+)?(?:modify|change|update|edit|revise|adjust)\s+',
-            SemanticAct.DELETE: r'(?:I\s+|we\s+)?(?:delete|remove|drop|discard)\s+',
-            SemanticAct.OBSERVE: r'(?:I\s+)?(?:notice|see|observe|found)\s+(?:that\s+)?',
+            SemanticAct.CREATE: r'(?:I\s+|we\s+)?(?:create[ds]?|build|built|make|implement(?:ed)?|develop(?:ed)?|writ(?:e|ten)|generate[ds]?|add(?:ed)?)\s+',
+            SemanticAct.MODIFY: r'(?:I\s+|we\s+)?(?:modif(?:y|ied)|change[ds]?|update[ds]?|edit(?:ed)?|revis(?:e[ds]?|ing)|adjust(?:ed)?|fix(?:ed)?|improv(?:e[ds]?|ing))\s+',
+            SemanticAct.DELETE: r'(?:I\s+|we\s+)?(?:delete[ds]?|remov(?:e[ds]?|ing)|drop(?:ped)?|discard(?:ed)?)\s+',
+            SemanticAct.OBSERVE: r'(?:I\s+)?(?:notice[ds]?|see|observe[ds]?|found|show[ns]?|reveal[ns]?|indicat(?:e[ds]?|ing)|confirm[ns]?)\s+(?:that\s+)?',
             SemanticAct.EXPLAIN: r'(?:explain|because|the reason is)\s+(?:that\s+)?',
             SemanticAct.QUERY: r'(?:what is|what are|how does|how do|how is|how are|why|where|when)\s+',
             SemanticAct.WARN: r'(?:warn|be careful|watch out)\s+(?:about\s+)?',
@@ -189,13 +189,14 @@ class RuleBasedParser:
 
         # Step 2b: Handle comma-separated stance clauses
         # "I disagree, a monolith is better" → "a monolith is better"
-        # Only strip if what's after the comma has enough content
+        # Only strip if the stance word is at the START (not mid-sentence)
+        # and what's after the comma has enough content
         comma_stance = re.match(
-            r'^(?:I\s+)?(?:agree|disagree|concur|think so|don\'t think so)[,;]\s*(.+)',
+            r'^(?:I\s+)?(agree|disagree|concur|think so|don\'t think so)[,;]\s*(.+)',
             cleaned, re.IGNORECASE,
         )
-        if comma_stance and len(comma_stance.group(1).split()) >= 3:
-            cleaned = comma_stance.group(1)
+        if comma_stance and len(comma_stance.group(2).split()) >= 3:
+            cleaned = comma_stance.group(2)
 
         # Step 3: Reduce clausal complexity — extract core topic
         # Strip punctuation early so trailing-word patterns work
@@ -215,7 +216,12 @@ class RuleBasedParser:
         # "use PostgreSQL" → "PostgreSQL", "deploy on AWS" → "AWS"
         cleaned = re.sub(
             r'^(?:use|using|deploy|deploying|design|designing|consider|considered|'
-            r'handle|handling|require|requires|suggest|suggesting)\s+',
+            r'handle|handling|require|requires|suggest|suggesting|'
+            r'added|implemented|built|created|wrote|generated|'
+            r'updated|changed|fixed|improved|modified|revised|'
+            r'removed|deleted|dropped|'
+            r'shows?|reveals?|indicates?|confirms?|'
+            r'completed|passed|finished|done)\s+',
             '', cleaned, flags=re.IGNORECASE,
         )
 

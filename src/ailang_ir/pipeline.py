@@ -105,6 +105,34 @@ class Pipeline:
         """Process multiple texts."""
         return [self.process(t, speaker, tags) for t in texts]
 
+    def process_conversation(
+        self,
+        turns: list[tuple[str, str]],
+        tags: list[str] | None = None,
+    ) -> list[ProcessResult]:
+        """
+        Process a multi-turn conversation.
+
+        Args:
+            turns: list of (speaker, text) tuples.
+                   Speaker: "user", "agent", "system", or "u", "a", "s"
+            tags: optional tags for all turns
+
+        Returns:
+            list of ProcessResult for each turn
+        """
+        speaker_map = {
+            "user": SpeakerRole.USER, "u": SpeakerRole.USER,
+            "agent": SpeakerRole.AGENT, "a": SpeakerRole.AGENT,
+            "system": SpeakerRole.SYSTEM, "s": SpeakerRole.SYSTEM,
+        }
+        results = []
+        for speaker_str, text in turns:
+            role = speaker_map.get(speaker_str.lower(), SpeakerRole.UNKNOWN)
+            for r in self.process_multi(text, role, tags):
+                results.append(r)
+        return results
+
     def process_multi(
         self,
         text: str,

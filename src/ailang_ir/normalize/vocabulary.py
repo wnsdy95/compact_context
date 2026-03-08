@@ -56,15 +56,17 @@ ACT_SURFACE_MAP: dict[SemanticAct, list[str]] = {
     ],
     SemanticAct.CREATE: [
         "create", "build", "make", "construct", "implement",
-        "develop", "write", "generate",
+        "develop", "write", "generate", "added", "add",
+        "implemented", "built", "created", "wrote",
     ],
     SemanticAct.MODIFY: [
         "modify", "change", "update", "edit", "revise",
-        "adjust", "alter", "refactor",
+        "adjust", "alter", "refactor", "updated", "changed",
+        "fixed", "fix", "improved", "improve",
     ],
     SemanticAct.DELETE: [
         "delete", "remove", "drop", "discard", "eliminate",
-        "get rid of",
+        "get rid of", "removed", "deleted",
     ],
     SemanticAct.QUERY: [
         "what is", "what are", "how does", "how do",
@@ -73,6 +75,9 @@ ACT_SURFACE_MAP: dict[SemanticAct, list[str]] = {
     SemanticAct.OBSERVE: [
         "notice", "see", "observe", "found", "discovered",
         "it seems", "appears", "looks like",
+        "shows", "reveals", "indicates", "confirms",
+        "results show", "verification shows",
+        "passing", "passed", "completed", "done",
     ],
     SemanticAct.COMPARE: [
         "compare", "versus", "vs", "better than", "worse than",
@@ -213,10 +218,18 @@ class NormalizationVocabulary:
         best_pos = len(lower)  # earliest match wins
         for act, patterns in self.act_map.items():
             for pattern in patterns:
-                pos = lower.find(pattern.lower())
-                if pos != -1 and pos < best_pos:
-                    best_pos = pos
-                    best_act = act
+                pat_lower = pattern.lower()
+                # Short patterns (≤3 chars like "no", "yes", "use") need word boundary
+                if len(pat_lower) <= 3:
+                    m = re.search(r'\b' + re.escape(pat_lower) + r'\b', lower)
+                    if m and m.start() < best_pos:
+                        best_pos = m.start()
+                        best_act = act
+                else:
+                    pos = lower.find(pat_lower)
+                    if pos != -1 and pos < best_pos:
+                        best_pos = pos
+                        best_act = act
         return best_act
 
     def match_mode(self, text: str) -> SemanticMode:
