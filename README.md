@@ -82,6 +82,24 @@ python -m ailang_ir interactive --snippets --store memory.json
 
 Interactive commands: `/speaker <u|s|a>`, `/export [n]`, `/snippets`, `/stats`, `/quit`
 
+### MCP Server (Claude Code Integration)
+
+Add to your Claude Code MCP config (`~/.claude/claude_code_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "ailang-ir": {
+      "command": "python",
+      "args": ["-m", "ailang_ir.mcp_server"],
+      "env": {}
+    }
+  }
+}
+```
+
+This exposes 7 tools over JSON-RPC 2.0 (stdio): `compress_text`, `compress_conversation`, `export_context`, `search_memory`, `get_stats`, `get_format_spec`, `clear_memory`. No external dependencies — stdlib only.
+
 ### LLM Integration
 
 Inject the format spec into your system prompt, then use compressed context:
@@ -148,7 +166,7 @@ Layers are kept separate: ingestion, normalization, semantic extraction, frame c
 
 ```bash
 pip install -e ".[dev]"
-pytest tests/ -q          # 310 tests
+pytest tests/ -q          # 370 tests
 ```
 
 ## Project Structure
@@ -165,6 +183,7 @@ src/ailang_ir/
   decoder/reconstructor.py # Code → NL reconstruction
   memory/store.py      # MemoryStore (dedup, search, persistence)
   normalize/vocabulary.py # Normalization + compression vocabulary
+  mcp_server.py       # MCP server (JSON-RPC 2.0 over stdio)
   llm/
     codec.py           # LLM-native encode/decode + source snippets
     format_spec.py     # FORMAT_SPEC for system prompt injection
